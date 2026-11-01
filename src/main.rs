@@ -5,10 +5,14 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use pewp::{components, render};
+use fmtagno::{components, render};
 
 #[derive(Parser)]
-#[command(name = "pewp", version, about = "把一份 JSON 渲染成 docx / pdf / html")]
+#[command(
+    name = "fmtagno",
+    version,
+    about = "把一份 JSON 渲染成 docx / pdf / html"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -29,8 +33,8 @@ struct Defs {
 }
 
 impl Defs {
-    fn env(self, input: &Path) -> Result<pewp::Env> {
-        pewp::load_env(
+    fn env(self, input: &Path) -> Result<fmtagno::Env> {
+        fmtagno::load_env(
             doc_dir(input).as_deref(),
             &self.catalog,
             &self.style_sets,
@@ -41,7 +45,7 @@ impl Defs {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// 渲染文档：pewp render doc.json -o out.html（输入写 - 表示从标准输入读）
+    /// 渲染文档：fmtagno render doc.json -o out.html（输入写 - 表示从标准输入读）
     Render {
         input: PathBuf,
         /// 输出文件，按扩展名选格式；写 - 表示输出到标准输出，这时要配 --format
@@ -113,8 +117,8 @@ fn main() -> Result<()> {
             let text = read_input(&input)?;
             let base_dir = doc_dir(&input);
             let env = defs.env(&input)?;
-            let (d, tree) = pewp::prepare(&text, &env)
-                .with_context(|| format!("{} 不是合法的 pewp 文档", input.display()))?;
+            let (d, tree) = fmtagno::prepare(&text, &env)
+                .with_context(|| format!("{} 不是合法的 fmtagno 文档", input.display()))?;
             let out = render::render(&d, &tree, fmt, &render::Options { base_dir, paged })?;
             for w in &out.warnings {
                 eprintln!("警告：{w}");
@@ -131,13 +135,13 @@ fn main() -> Result<()> {
         Cmd::Check { input, defs } => {
             let text = read_input(&input)?;
             let env = defs.env(&input)?;
-            let (d, _) = pewp::prepare(&text, &env)
+            let (d, _) = fmtagno::prepare(&text, &env)
                 .with_context(|| format!("{} 校验没通过", input.display()))?;
             println!("ok：展开后 {} 个元素", d.elements.len());
             Ok(())
         }
         Cmd::Catalog { json, catalog } => {
-            let cat = pewp::load_env(None, &catalog, &[], None)?.catalog;
+            let cat = fmtagno::load_env(None, &catalog, &[], None)?.catalog;
             if json {
                 let mut m = serde_json::Map::new();
                 for s in components::BUILTINS {

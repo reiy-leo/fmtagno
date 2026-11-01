@@ -1,10 +1,10 @@
 [package]
-name = "pewp"
+name = "fmtagno"
 version = "0.0.0"
 edition = "2024"
 description = "One JSON document, rendered through a registered component catalog to docx, pdf and html."
 license = "MIT"
-repository = "https://github.com/reiy-leo/pewp"
+repository = "https://github.com/reiy-leo/fmtagno"
 readme = "README.md"
 keywords = ["docx", "pdf", "json", "mcp", "document"]
 categories = ["command-line-utilities", "text-processing"]

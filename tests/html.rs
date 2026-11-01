@@ -1,8 +1,8 @@
-use pewp::render::Format;
+use fmtagno::render::Format;
 
 fn html(json: &str) -> String {
     String::from_utf8(
-        pewp::render_str(json, Format::Html, Some(std::path::Path::new("examples")))
+        fmtagno::render_str(json, Format::Html, Some(std::path::Path::new("examples")))
             .unwrap()
             .bytes,
     )
@@ -45,13 +45,13 @@ fn rich_runs_and_slide() {
       }
     }"##,
     );
-    assert!(s.contains("class=\"pewp-slide\""));
+    assert!(s.contains("class=\"fmtagno-slide\""));
     assert!(s.contains("font-weight:700;\">粗</span>"));
     assert!(s.contains("<a href=\"https://example.com\"><span"));
 }
 
 fn err(json: &str) -> String {
-    match pewp::render_str(json, Format::Html, None) {
+    match fmtagno::render_str(json, Format::Html, None) {
         Ok(_) => panic!("应该报错"),
         Err(e) => format!("{e:#}"),
     }
@@ -84,11 +84,11 @@ fn rejects_bad_documents() {
 #[test]
 fn showcase_example_renders() {
     let s = html(include_str!("../examples/showcase.json"));
-    assert!(s.contains("class=\"pewp-list\" id=\"steps\""));
+    assert!(s.contains("class=\"fmtagno-list\" id=\"steps\""));
     assert!(s.contains(">1.</span>"));
     assert!(s.contains("<code style="));
     assert!(s.contains("<col style=\"width:20.00%\">"));
-    assert!(s.contains("class=\"pewp-pagebreak\""));
+    assert!(s.contains("class=\"fmtagno-pagebreak\""));
     assert!(s.contains("font-size:11pt"));
     assert!(s.contains("src=\"data:image/svg+xml;base64,"));
 }
@@ -96,16 +96,16 @@ fn showcase_example_renders() {
 #[test]
 fn paged_mode_embeds_pagedjs() {
     let json = include_str!("../examples/pages.json");
-    let (d, tree) = pewp::prepare(json, &pewp::Env::default()).unwrap();
-    let opts = pewp::render::Options {
+    let (d, tree) = fmtagno::prepare(json, &fmtagno::Env::default()).unwrap();
+    let opts = fmtagno::render::Options {
         paged: true,
         ..Default::default()
     };
-    let out = pewp::render::render(&d, &tree, pewp::render::Format::Html, &opts).unwrap();
+    let out = fmtagno::render::render(&d, &tree, fmtagno::render::Format::Html, &opts).unwrap();
     let s = String::from_utf8(out.bytes).unwrap();
     assert!(s.contains("Paged.js v0.4.3"));
     assert!(s.contains(".pagedjs_page"));
     // 默认不带
-    let plain = pewp::render_str(json, pewp::render::Format::Html, None).unwrap();
+    let plain = fmtagno::render_str(json, fmtagno::render::Format::Html, None).unwrap();
     assert!(!String::from_utf8(plain.bytes).unwrap().contains("Paged.js"));
 }

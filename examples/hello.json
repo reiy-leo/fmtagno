@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "meta": { "title": "pewp 示例", "lang": "zh-CN", "page": { "size": "A4", "margin": "20mm" } },
+  "meta": { "title": "fmtagno 示例", "lang": "zh-CN", "page": { "size": "A4", "margin": "20mm" } },
   "styles": {
     "muted": { "color": "#666666", "fontSize": 10 }
   },

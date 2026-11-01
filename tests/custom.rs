@@ -1,16 +1,16 @@
 use std::path::Path;
 
-use pewp::{Env, render::Format};
+use fmtagno::{Env, render::Format};
 
 fn examples_catalog() -> Env {
-    pewp::load_env(Some(Path::new("examples")), &[], &[], None).unwrap()
+    fmtagno::load_env(Some(Path::new("examples")), &[], &[], None).unwrap()
 }
 
 #[test]
 fn example_expands_and_renders_everywhere() {
     let cat = examples_catalog();
     let json = include_str!("../examples/custom.json");
-    let (d, _) = pewp::prepare(json, &cat).unwrap();
+    let (d, _) = fmtagno::prepare(json, &cat).unwrap();
     // 实例 id 留给根元素，其余加前缀
     assert_eq!(d.elements["tip"].kind, "Document");
     assert_eq!(
@@ -23,12 +23,12 @@ fn example_expands_and_renders_everywhere() {
     );
     assert!(d.elements["ch1.lead"].props["text"].is_array());
     for f in [Format::Html, Format::Docx, Format::Pdf] {
-        let out = pewp::render_with(json, f, Some(Path::new("examples")), &cat).unwrap();
+        let out = fmtagno::render_with(json, f, Some(Path::new("examples")), &cat).unwrap();
         assert!(!out.bytes.is_empty());
     }
-    let html = pewp::render_with(json, Format::Html, None, &cat).unwrap();
+    let html = fmtagno::render_with(json, Format::Html, None, &cat).unwrap();
     let html = String::from_utf8(html.bytes).unwrap();
-    assert!(html.contains("pewp　2026-10-28"));
+    assert!(html.contains("fmtagno　2026-10-28"));
 }
 
 fn doc_with(components: &str, elements: &str) -> String {
@@ -38,7 +38,7 @@ fn doc_with(components: &str, elements: &str) -> String {
 }
 
 fn err(json: &str) -> String {
-    format!("{:#}", pewp::prepare(json, &Env::default()).unwrap_err())
+    format!("{:#}", fmtagno::prepare(json, &Env::default()).unwrap_err())
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn detects_recursion() {
 
 #[test]
 fn definition_file_parses() {
-    let def = pewp::custom::parse_def(include_str!("../examples/catalog/callout.json")).unwrap();
+    let def = fmtagno::custom::parse_def(include_str!("../examples/catalog/callout.json")).unwrap();
     assert_eq!(def.name, "Callout");
     assert!(def.container);
     def.validate().unwrap();

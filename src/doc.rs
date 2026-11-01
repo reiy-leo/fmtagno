@@ -225,7 +225,7 @@ impl Node {
 pub fn load(path: &Path) -> Result<Doc> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("读不了 {}", path.display()))?;
-    parse(&text).with_context(|| format!("{} 不是合法的 pewp JSON", path.display()))
+    parse(&text).with_context(|| format!("{} 不是合法的 fmtagno JSON", path.display()))
 }
 
 pub fn parse(text: &str) -> Result<Doc> {

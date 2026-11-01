@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use pewp::render::Format;
+use fmtagno::render::Format;
 
 #[test]
 fn showcase_renders_to_pdf() {
-    let out = pewp::render_str(
+    let out = fmtagno::render_str(
         include_str!("../examples/showcase.json"),
         Format::Pdf,
         Some(Path::new("examples")),
@@ -22,15 +22,15 @@ fn showcase_renders_to_pdf() {
 #[test]
 fn quotes_and_markup_chars_survive() {
     let json = r##"{"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Text","props":{"text":"a \"b\" \\ #c *d* _e_ $f$ <g> @h [i]"}}}}"##;
-    let out = pewp::render_str(json, Format::Pdf, None).unwrap();
+    let out = fmtagno::render_str(json, Format::Pdf, None).unwrap();
     assert!(out.bytes.starts_with(b"%PDF-"));
 }
 
 #[test]
 fn styled_blocks_span_full_width() {
-    let d = pewp::doc::parse(r##"{"root":"d","elements":{"d":{"type":"Document","children":["s"]},"s":{"type":"Text","props":{"text":"x"},"style":{"align":"right","color":"#666"}}}}"##).unwrap();
+    let d = fmtagno::doc::parse(r##"{"root":"d","elements":{"d":{"type":"Document","children":["s"]},"s":{"type":"Text","props":{"text":"x"},"style":{"align":"right","color":"#666"}}}}"##).unwrap();
     let tree = d.tree().unwrap();
-    let (src, _, _) = pewp::render::pdf::markup(&d, &tree, &Default::default());
+    let (src, _, _) = fmtagno::render::pdf::markup(&d, &tree, &Default::default());
     assert!(src.contains("width: 100%"), "{src}");
     assert!(src.contains("#set align(right)"), "{src}");
 }

@@ -4,7 +4,7 @@
 >
 > 已定（Rei 2026-10-28）：字段平铺在 `style` 下；字段名跟 CSS 走；不做主题色。
 
-pewp 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的属性列全，再归并成一套字段。HTML 和 PDF（Typst）按这套字段去对应，表达不了的就忽略并给警告。
+fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的属性列全，再归并成一套字段。HTML 和 PDF（Typst）按这套字段去对应，表达不了的就忽略并给警告。
 
 依据：ECMA-376 第 5 版 Part 1（WordprocessingML 第 17 章、SpreadsheetML 第 18 章、DrawingML 第 20–21 章）。
 
@@ -110,7 +110,7 @@ pewp 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的属�
 
 线型 `style` 只收各格式都有的几种，再按格式换：
 
-| pewp | Word val | PPT prstDash / cmpd | Excel style | CSS |
+| fmtagno | Word val | PPT prstDash / cmpd | Excel style | CSS |
 |---|---|---|---|---|
 | `none` | nil | a:noFill | 不写 | none |
 | `solid` | single | solid | 按粗细：hair（≤0.25pt）、thin（≤1）、medium（≤2）、thick | solid |
@@ -280,8 +280,8 @@ Word 的列表定义在 numbering.xml：`w:abstractNum` 下每一级一个 `w:lv
 
 一个元素的样式按下面的顺序叠，后面的覆盖前面的：
 
-1. 父元素传下来的文字、段落、列表字段（像 CSS 继承；边框、背景、盒子、图片位置字段不继承）。根元素的「父元素」是 pewp 内置的全局默认值，再叠上样式集的 `global`（有 `extends` 时先叠父样式集的）。
-2. pewp 内置的组件默认样式：先 `Heading`，再 `Heading.1`。
+1. 父元素传下来的文字、段落、列表字段（像 CSS 继承；边框、背景、盒子、图片位置字段不继承）。根元素的「父元素」是 fmtagno 内置的全局默认值，再叠上样式集的 `global`（有 `extends` 时先叠父样式集的）。
+2. fmtagno 内置的组件默认样式：先 `Heading`，再 `Heading.1`。
 3. 样式集的组件样式：先 `Heading`，再 `Heading.1`。
 4. 顶层 `styles` 里的组件样式：同样先 `Heading` 再 `Heading.1`。
 5. 自定义组件模板里写的 `style`（内层模板在前，外层模板给实例写的在后）。
@@ -443,7 +443,7 @@ docx 里各部位的样式现在逐格写成直接格式。docx-rs 还不支持 
     "props": {
       "text": [
         "运行",
-        { "type": "InlineCode", "text": "pewp render doc.json -o out.pdf" },
+        { "type": "InlineCode", "text": "fmtagno render doc.json -o out.pdf" },
         "生成 PDF。"
       ]
     }

@@ -1,19 +1,19 @@
 //! 样式模型：样式集、继承顺序、部位、列表、代码。
 
-use pewp::{Env, render::Format};
+use fmtagno::{Env, render::Format};
 
 fn html(json: &str) -> String {
-    let out = pewp::render_with(json, Format::Html, None, &Env::default()).unwrap();
+    let out = fmtagno::render_with(json, Format::Html, None, &Env::default()).unwrap();
     String::from_utf8(out.bytes).unwrap()
 }
 
 fn err(json: &str) -> String {
-    format!("{:#}", pewp::prepare(json, &Env::default()).unwrap_err())
+    format!("{:#}", fmtagno::prepare(json, &Env::default()).unwrap_err())
 }
 
 fn all_formats(json: &str) {
     for f in [Format::Html, Format::Docx, Format::Pdf] {
-        let out = pewp::render_str(json, f, None).unwrap_or_else(|e| panic!("{f:?}: {e:#}"));
+        let out = fmtagno::render_str(json, f, None).unwrap_or_else(|e| panic!("{f:?}: {e:#}"));
         assert!(!out.bytes.is_empty());
     }
 }
@@ -44,7 +44,7 @@ const SETS: &str = r##"{
 
 #[test]
 fn style_sets_cascade() {
-    let (_, tree) = pewp::prepare(SETS, &Env::default()).unwrap();
+    let (_, tree) = fmtagno::prepare(SETS, &Env::default()).unwrap();
     let h = &tree.children[0].style;
     // extends：formal 的 fontSize 22，modern 的颜色，顶层 styles 的居中
     assert_eq!(h.size_pt(), 22.0);
@@ -65,7 +65,7 @@ fn command_line_style_set_wins() {
         style_set: Some("formal".into()),
         ..Env::default()
     };
-    let (_, tree) = pewp::prepare(SETS, &env).unwrap();
+    let (_, tree) = fmtagno::prepare(SETS, &env).unwrap();
     assert_eq!(
         tree.children[0].style.color.as_ref().unwrap().rgb(),
         "111111"
@@ -183,7 +183,7 @@ const CODE: &str = r##"{
   "root": "d",
   "elements": {
     "d": { "type": "Document", "children": ["t", "c"] },
-    "t": { "type": "Text", "props": { "text": ["运行 ", { "type": "InlineCode", "text": "pewp render" }, " 生成文件"] } },
+    "t": { "type": "Text", "props": { "text": ["运行 ", { "type": "InlineCode", "text": "fmtagno render" }, " 生成文件"] } },
     "c": { "type": "Code", "props": { "language": "rust", "code": "fn main() {\n    println!(\"你好\");\n}", "lineNumbers": true } }
   }
 }"##;
@@ -194,7 +194,7 @@ fn code_and_inline_code() {
     assert!(s.contains("<code style=\""));
     assert!(s.contains("color:#CF222E"));
     assert!(s.contains("class=\"language-rust\""));
-    assert!(s.contains("<span class=\"pewp-ln\">2</span>    println!"));
+    assert!(s.contains("<span class=\"fmtagno-ln\">2</span>    println!"));
     assert!(err(r#"{"root":"x","elements":{"x":{"type":"InlineCode"}}}"#).contains("runs"));
     all_formats(CODE);
 }
@@ -217,7 +217,7 @@ fn custom_component_parts_and_overrides() {
         "p": { "type": "PriceTable", "props": { "rows": [["苹果", "3"]] } }
       }
     }"##;
-    let (_, tree) = pewp::prepare(json, &Env::default()).unwrap();
+    let (_, tree) = fmtagno::prepare(json, &Env::default()).unwrap();
     let t = &tree.children[0];
     // 模板样式盖住通用的 Table 样式（12 → 9），PriceTable:t.header 再盖住模板的 parts
     assert_eq!(t.style.size_pt(), 9.0);

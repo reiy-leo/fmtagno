@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "meta": { "title": "pewp 组件一览", "author": "Rei", "lang": "zh-CN", "page": { "size": "A4", "margin": "18mm" } },
+  "meta": { "title": "fmtagno 组件一览", "author": "Rei", "lang": "zh-CN", "page": { "size": "A4", "margin": "18mm" } },
   "styles": {
     "muted": { "color": "#666666", "fontSize": 10 },
     "center": { "align": "center" },
@@ -9,7 +9,7 @@
   "root": "doc",
   "elements": {
     "doc": { "type": "Document", "children": ["logo", "title", "lead", "h-list", "steps", "h-table", "table", "tip", "break", "cover"] },
-    "logo": { "type": "Image", "props": { "src": "logo.svg", "alt": "pewp", "width": 90, "caption": "相对路径按文档所在目录找" } },
+    "logo": { "type": "Image", "props": { "src": "logo.svg", "alt": "fmtagno", "width": 90, "caption": "相对路径按文档所在目录找" } },
     "title": { "type": "Heading", "props": { "level": 1, "text": "组件一览" }, "style": "center" },
     "lead": {
       "type": "Text",
@@ -19,12 +19,12 @@
         { "text": "斜体", "italic": true }, { "text": "、" },
         { "text": "红字", "color": "#CF222E" }, { "text": "、" },
         { "text": "代码", "type": "InlineCode" }, { "text": "、" },
-        { "text": "链接", "href": "https://github.com/reiy-leo/pewp" }, { "text": "。" }
+        { "text": "链接", "href": "https://github.com/reiy-leo/fmtagno" }, { "text": "。" }
       ] },
       "style": ["muted", { "fontSize": 11 }]
     },
     "h-list": { "type": "Heading", "props": { "level": 2, "text": "列表" } },
-    "steps": { "type": "List", "props": { "ordered": true, "items": ["写 JSON", "pewp check", [{ "text": "pewp render", "type": "InlineCode" }, { "text": " 出文件" }]] } },
+    "steps": { "type": "List", "props": { "ordered": true, "items": ["写 JSON", "fmtagno check", [{ "text": "fmtagno render", "type": "InlineCode" }, { "text": " 出文件" }]] } },
     "h-table": { "type": "Heading", "props": { "level": 2, "text": "表格" } },
     "table": {
       "type": "Table",

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-pewp：一份 JSON，按注册好的组件渲染成 docx、pdf、html（第二版加 xlsx、pptx）。本地 Rust 命令行加 MCP server，通过 Homebrew 发布。产品说明见 [docs/PRODUCT.md](docs/PRODUCT.md)。
+fmtagno：一份 JSON，按注册好的组件渲染成 docx、pdf、html（第二版加 xlsx、pptx）。本地 Rust 命令行加 MCP server，通过 Homebrew 发布。产品说明见 [docs/PRODUCT.md](docs/PRODUCT.md)。
 
 ## 边界
 
@@ -36,7 +36,7 @@ docs/           产品说明和设计文档
 
 ## 构建环境
 
-Hark 沙箱内存小，编译 typst、image 时会被杀。构建和测试放在 LightVela 服务器（`~/src/pewp`）上跑；看 docx、pdf 效果用那台的 LibreOffice 和 poppler。调 PDF 排版时设 `PEWP_DEBUG_TYPST=1`，会把生成的 Typst 源码打到标准错误。
+Hark 沙箱内存小，编译 typst、image 时会被杀。构建和测试放在 LightVela 服务器（`~/src/fmtagno`）上跑；看 docx、pdf 效果用那台的 LibreOffice 和 poppler。调 PDF 排版时设 `FMTAGNO_DEBUG_TYPST=1`，会把生成的 Typst 源码打到标准错误。
 
 ## 命令
 

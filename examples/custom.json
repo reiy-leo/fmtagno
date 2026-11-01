@@ -21,6 +21,6 @@
     "tip": { "type": "Callout", "props": { "title": "提示" }, "children": ["tip-body", "tip-list"] },
     "tip-body": { "type": "Text", "props": { "text": "组件定义放在文档旁边的 catalog/ 目录里，会自动读取；也可以用 --catalog 指定，或者像落款这样直接写进文档的 components。" } },
     "tip-list": { "type": "List", "props": { "items": ["定义文件用 JSON", "模板里只能用内置组件和别的自定义组件"] } },
-    "sign": { "type": "Signature", "props": { "who": "pewp", "date": "2026-10-28" } }
+    "sign": { "type": "Signature", "props": { "who": "fmtagno", "date": "2026-10-28" } }
   }
 }

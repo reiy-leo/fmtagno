@@ -1,24 +1,24 @@
-# pewp 产品说明
+# fmtagno 产品说明
 
-pewp 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版细节，只引用提前注册好的组件，再带一点样式。思路来自 [vercel-labs/json-render](https://github.com/vercel-labs/json-render)。
+fmtagno 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版细节，只引用提前注册好的组件，再带一点样式。思路来自 [vercel-labs/json-render](https://github.com/vercel-labs/json-render)。
 
 它是本地命令行工具，单个 Rust 二进制，另带一个 MCP server 给 AI 调用。通过 Homebrew 安装。
 
 ## 给谁用
 
 - 想用一份数据同时出 Word、PDF 和网页的人。
-- 想让 AI 直接产出办公文档的人：AI 只管写 JSON，pewp 负责排版。
+- 想让 AI 直接产出办公文档的人：AI 只管写 JSON，fmtagno 负责排版。
 
 ## 第一版（v0.1）
 
 - 格式：docx、pdf、html。
 - 内置组件：Heading、Text、Code、List、Table、Image、PageBreak、Slide，外加根组件 Document；行内有 InlineCode（写在 runs 里）。
 - 命令行：
-  - `pewp render doc.json -o out.docx`：按输出文件的扩展名选格式。
-  - `pewp check doc.json`：只校验，不出文件。
-  - `pewp catalog`：列出能用的组件，加 `--json` 输出 schema。
+  - `fmtagno render doc.json -o out.docx`：按输出文件的扩展名选格式。
+  - `fmtagno check doc.json`：只校验，不出文件。
+  - `fmtagno catalog`：列出能用的组件，加 `--json` 输出 schema。
   - 输入写 `-` 从标准输入读；输出写 `-` 时配 `--format` 写到标准输出。
-  - `pewp mcp`：以 MCP server 方式运行（stdio）。
+  - `fmtagno mcp`：以 MCP server 方式运行（stdio）。
 - MCP 工具：`render`（JSON 进，文件出）、`check`、`list_components`（带每个组件的 props 说明，方便 AI 写对）。
 - 自定义组件：JSON 定义文件，用内置组件拼。
 
@@ -52,7 +52,7 @@ pewp 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版细�
 }
 ```
 
-- `type`：组件名，必须在组件目录里。`pewp catalog --json` 能看到每个组件 props 的 JSON Schema。
+- `type`：组件名，必须在组件目录里。`fmtagno catalog --json` 能看到每个组件 props 的 JSON Schema。
 - `props`：组件自己的参数，多写、少写、写错类型都会报错。
 - `style`：三种写法都行：样式名 `"muted"`；样式名数组 `["muted", "center"]`，后面的覆盖前面的；样式对象 `{ "fontSize": 11 }`。数组里也能混写对象。
 - `parts`：部位样式，比如表格的 `header`、`evenRow`、`lastRow`，列表的 `level2`、`marker`。

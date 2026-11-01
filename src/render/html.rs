@@ -28,7 +28,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         opts,
     };
     let lang = doc.meta.lang.as_deref().unwrap_or("zh-CN");
-    let title = doc.meta.title.as_deref().unwrap_or("pewp");
+    let title = doc.meta.title.as_deref().unwrap_or("fmtagno");
     let page = &doc.meta.page;
     let mut ws = Vec::new();
     let (w, h) = page.dims_pt(&mut ws);
@@ -41,7 +41,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         r.out,
         "<!doctype html>\n<html lang=\"{}\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <meta name=\"generator\" content=\"pewp {}\">\n",
+         <meta name=\"generator\" content=\"fmtagno {}\">\n",
         esc(lang),
         env!("CARGO_PKG_VERSION")
     );
@@ -54,7 +54,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         .filter(|c| c.count() > 1)
         .map(|c| {
             format!(
-                "main.pewp-root {{ column-count: {}; column-gap: {}pt; }}\n",
+                "main.fmtagno-root {{ column-count: {}; column-gap: {}pt; }}\n",
                 c.count(),
                 c.gap_pt()
             )
@@ -95,14 +95,14 @@ th, td { text-align: inherit; vertical-align: top; font-weight: inherit; }
 figure img { max-width: 100%; height: auto; display: block; }
 pre { white-space: pre-wrap; }
 code { font: inherit; }
-.pewp-list { list-style: none; padding: 0; }
-.pewp-marker { display: inline-block; white-space: nowrap; }
-.pewp-ln { display: inline-block; min-width: 2.5em; color: #999; user-select: none; }
-.pewp-pagebreak { break-after: page; }
-.pewp-slide { aspect-ratio: 16 / 9; border: 1px solid #ddd; border-radius: 6px; padding: 2rem 3rem; \
+.fmtagno-list { list-style: none; padding: 0; }
+.fmtagno-marker { display: inline-block; white-space: nowrap; }
+.fmtagno-ln { display: inline-block; min-width: 2.5em; color: #999; user-select: none; }
+.fmtagno-pagebreak { break-after: page; }
+.fmtagno-slide { aspect-ratio: 16 / 9; border: 1px solid #ddd; border-radius: 6px; padding: 2rem 3rem; \
 margin: 1.5rem 0; overflow: hidden; break-inside: avoid; break-after: page; position: relative; }
-@media screen { .pewp-pagebreak { border-top: 1px dashed #bbb; margin: 2rem 0; } }
-@media print { body { max-width: none; margin: 0; padding: 0; } .pewp-slide { border: none; } }
+@media screen { .fmtagno-pagebreak { border-top: 1px dashed #bbb; margin: 2rem 0; } }
+@media print { body { max-width: none; margin: 0; padding: 0; } .fmtagno-slide { border: none; } }
 ";
 
 /// Paged.js 0.4.3（MIT，许可证见 assets/pagedjs-LICENSE.md），`--paged` 时内嵌进 HTML。
@@ -111,7 +111,7 @@ const PAGED_JS: &str = include_str!("../../assets/paged.polyfill.min.js");
 /// Paged.js 自己不会在续页重复 thead：表格被切开后，给续上的那半张表补一份表头。
 /// repeatHeader: false 时表头不放进 thead，这里自然不会补。
 const PAGED_REPEAT_THEAD: &str = "\
-class PewpRepeatThead extends Paged.Handler {
+class FmtagnoRepeatThead extends Paged.Handler {
   // 续页上放第一行之前补表头，排版时就把表头的高度算进去，不会挤掉最后一行
   renderNode(clone, node) {
     if (clone.nodeType !== 1 || clone.tagName !== 'TR') return;
@@ -124,7 +124,7 @@ class PewpRepeatThead extends Paged.Handler {
     t.insertBefore(copy, t.querySelector(':scope > tbody') || t.firstChild);
   }
 }
-Paged.registerHandlers(PewpRepeatThead);";
+Paged.registerHandlers(FmtagnoRepeatThead);";
 
 /// 按页显示时的屏幕样式：灰底、白纸、阴影；正文不再限宽，屏幕上的分页虚线也不要了。
 /// 带 data-pagedjs-ignore，Paged.js 不去改写它。
@@ -133,13 +133,13 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
   body { max-width: none; margin: 0; padding: 0; background: #e8eaed; }
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; padding: 24px 0; }
   .pagedjs_page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); margin-bottom: 24px; }
-  .pewp-pagebreak { border-top: none; margin: 0; }
+  .fmtagno-pagebreak { border-top: none; margin: 0; }
 }
 @media print { body { background: none; } }
 </style>
 <style>
 /* Paged.js 不认空 div 上的 break-after，改成让下一个元素从新页开始 */
-.pewp-pagebreak + * { break-before: page; }
+.fmtagno-pagebreak + * { break-before: page; }
 </style>
 ";
 
@@ -164,7 +164,7 @@ impl Html<'_> {
         match &n.component {
             Component::Document(_) => {
                 let cls = if parent.is_none() {
-                    " class=\"pewp-root\""
+                    " class=\"fmtagno-root\""
                 } else {
                     ""
                 };
@@ -173,7 +173,10 @@ impl Html<'_> {
                 self.out.push_str("</main>\n");
             }
             Component::Slide(p) => {
-                let _ = writeln!(self.out, "<section class=\"pewp-slide\" id=\"{id}\"{st}>");
+                let _ = writeln!(
+                    self.out,
+                    "<section class=\"fmtagno-slide\" id=\"{id}\"{st}>"
+                );
                 if let Some(t) = &p.title {
                     let mut ts = n.style.clone();
                     ts.merge(&n.part("title"));
@@ -210,7 +213,10 @@ impl Html<'_> {
             Component::Table(p) => self.table(n, p, parent),
             Component::Image(p) => self.image(n, p, parent),
             Component::PageBreak(_) => {
-                let _ = writeln!(self.out, "<div class=\"pewp-pagebreak\" id=\"{id}\"></div>");
+                let _ = writeln!(
+                    self.out,
+                    "<div class=\"fmtagno-pagebreak\" id=\"{id}\"></div>"
+                );
             }
         }
     }
@@ -245,7 +251,7 @@ impl Html<'_> {
                 }
                 let _ = write!(
                     self.out,
-                    "<span class=\"pewp-ln\">{}</span>{}",
+                    "<span class=\"fmtagno-ln\">{}</span>{}",
                     i + 1,
                     esc(line)
                 );
@@ -261,7 +267,7 @@ impl Html<'_> {
         let lines = common::flatten_list(n, &p.items, p.ordered);
         let _ = writeln!(
             self.out,
-            "<div class=\"pewp-list\" id=\"{}\"{st}>",
+            "<div class=\"fmtagno-list\" id=\"{}\"{st}>",
             esc(&n.id)
         );
         let marker_part = n.part("marker");
@@ -312,7 +318,7 @@ impl Html<'_> {
             );
             let _ = write!(
                 self.out,
-                "<span class=\"pewp-marker\" style=\"{}\">",
+                "<span class=\"fmtagno-marker\" style=\"{}\">",
                 esc(&mcss)
             );
             match &s.list_marker_image {

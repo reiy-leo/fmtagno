@@ -159,7 +159,7 @@ impl Def {
         }
     }
 
-    /// 给 `pewp catalog --json` 用的 props JSON Schema。
+    /// 给 `fmtagno catalog --json` 用的 props JSON Schema。
     pub fn props_schema(&self) -> Value {
         let mut props = serde_json::Map::new();
         let mut required = Vec::new();

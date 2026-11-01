@@ -57,10 +57,10 @@ const DESCENT: f32 = 0.29;
 pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> {
     let (source, files, mut warnings) = markup(doc, tree, opts);
     let fallbacks = fallback_fonts(&source);
-    if std::env::var_os("PEWP_DEBUG_TYPST").is_some() {
+    if std::env::var_os("FMTAGNO_DEBUG_TYPST").is_some() {
         eprintln!("{source}");
     }
-    let world = PewpWorld::new(source, files);
+    let world = FmtagnoWorld::new(source, files);
     let warned = typst::compile::<PagedDocument>(&world);
     for w in warned.warnings.iter() {
         // 默认字体列表本来就是按平台挑着用的，找不到不算问题
@@ -1104,7 +1104,7 @@ fn library() -> &'static LazyHash<Library> {
     LIB.get_or_init(|| LazyHash::new(Library::default()))
 }
 
-struct PewpWorld {
+struct FmtagnoWorld {
     main: Source,
     files: HashMap<FileId, Bytes>,
 }
@@ -1114,7 +1114,7 @@ fn file_id(path: &str) -> FileId {
     RootedPath::new(VirtualRoot::Project, vpath).intern()
 }
 
-impl PewpWorld {
+impl FmtagnoWorld {
     fn new(source: String, files: Files) -> Self {
         let main = Source::new(file_id("/main.typ"), source);
         let files = files
@@ -1125,7 +1125,7 @@ impl PewpWorld {
     }
 }
 
-impl World for PewpWorld {
+impl World for FmtagnoWorld {
     fn library(&self) -> &LazyHash<Library> {
         library()
     }
