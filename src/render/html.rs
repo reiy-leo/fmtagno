@@ -13,8 +13,9 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Caps, Edge, EmphasisMark, Len, LineHeight, MarkerGap,
-        Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap, WrapMode,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, Edge, EmphasisMark, Len,
+        LineHeight, MarkerGap, Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap,
+        WrapMode,
     },
 };
 
@@ -26,6 +27,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         out: String::new(),
         warn: Warn::default(),
         opts,
+        tiles: Vec::new(),
     };
     let lang = doc.meta.lang.as_deref().unwrap_or("zh-CN");
     let title = doc.meta.title.as_deref().unwrap_or("fmtagno");
@@ -64,7 +66,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         r.out,
         "<title>{}</title>\n<style>\n@page {{ size: {w}pt {h}pt; margin: {mt}pt {mr}pt {mb}pt {}pt; }}\n\
          body {{ font-family: {DEFAULT_FONTS}; color: #1a1a1a; max-width: {}pt; margin: 2rem auto; padding: 0 1.5rem; }}\n\
-         {cols}{}</style>\n{}</head>\n<body>\n",
+         {cols}{}{TILES_MARK}</style>\n{}</head>\n<body>\n",
         esc(title),
         ml + gutter,
         w - ml - mr - gutter,
@@ -72,6 +74,14 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         if opts.paged { PAGED_CSS } else { "" }
     );
     r.node(tree, None);
+    // 图案边框的规则在渲染时才知道，回头填进 head 的 <style>
+    let rules: String = r
+        .tiles
+        .iter()
+        .enumerate()
+        .map(|(i, x)| x.replace("{N}", &i.to_string()))
+        .collect();
+    r.out = r.out.replacen(TILES_MARK, &rules, 1);
     if opts.paged {
         // 放在 body 末尾：Paged.js 加载完就把上面的内容按 @page 切成一页页
         r.out.push_str("<script>\n");
@@ -147,7 +157,11 @@ struct Html<'a> {
     out: String,
     warn: Warn,
     opts: &'a Options,
+    /// 图案边框的 CSS 规则，下标就是元素上 data-fmtagno-b 的值
+    tiles: Vec<String>,
 }
+
+const TILES_MARK: &str = "/*fmtagno-tiles*/";
 
 impl Html<'_> {
     fn node(&mut self, n: &Node, parent: Option<&Style>) {
@@ -230,11 +244,95 @@ impl Html<'_> {
     /// ` style="..."`，没有内容时是空串。
     fn attr(&mut self, s: &Style, parent: Option<&Style>, id: &str, ctx: Ctx) -> String {
         let c = self.css(s, parent, id, ctx);
-        if c.is_empty() {
-            String::new()
+        let mark = if matches!(ctx, Ctx::Block | Ctx::ListItem) {
+            self.tile_mark([
+                s.border_side(Edge::Top),
+                s.border_side(Edge::Right),
+                s.border_side(Edge::Bottom),
+                s.border_side(Edge::Left),
+            ])
         } else {
-            format!(" style=\"{}\"", esc(&c))
+            String::new()
+        };
+        if c.is_empty() {
+            mark
+        } else {
+            format!(" style=\"{}\"{mark}", esc(&c))
         }
+    }
+
+    /// CSS 画不出来的线型：边框本身写成透明（Border::css），再用 ::before 盖一层，
+    /// 每条边贴一条 SVG 图案背景。返回要加到元素上的属性，没有图案边就是空串。
+    /// ::before 以内边距框为准，四边各往外扩一个线宽，正好盖住边框（表格合并边框时，
+    /// 格子的内边距框在线中间往里半个线宽，扩一个线宽也正好盖住整条线）。
+    fn tile_mark(&mut self, sides: [Option<&Border>; 4]) -> String {
+        let mut layers = Vec::new();
+        let mut inset = [0.0f32; 4];
+        for (i, b) in sides.iter().enumerate() {
+            let Some(b) = b.filter(|b| !b.is_none()) else {
+                continue;
+            };
+            inset[i] = b.width;
+            if matches!(
+                b.style,
+                BorderStyle::Double
+                    | BorderStyle::ThreeDEmboss
+                    | BorderStyle::ThreeDEngrave
+                    | BorderStyle::Inset
+                    | BorderStyle::Outset
+            ) {
+                continue;
+            }
+            let side = Edge::ALL[i];
+            let Some(t) = common::border_tile(b, side) else {
+                continue;
+            };
+            let vertical = matches!(side, Edge::Left | Edge::Right);
+            let (pos, size, rep) = match side {
+                Edge::Top => (
+                    "left top",
+                    format!("{}pt {}pt", t.period, t.width),
+                    "repeat-x",
+                ),
+                Edge::Bottom => (
+                    "left bottom",
+                    format!("{}pt {}pt", t.period, t.width),
+                    "repeat-x",
+                ),
+                Edge::Left => (
+                    "left top",
+                    format!("{}pt {}pt", t.width, t.period),
+                    "repeat-y",
+                ),
+                Edge::Right => (
+                    "right top",
+                    format!("{}pt {}pt", t.width, t.period),
+                    "repeat-y",
+                ),
+            };
+            layers.push(format!(
+                "url(\"{}\") {pos} / {size} {rep}",
+                t.data_uri(vertical)
+            ));
+        }
+        if layers.is_empty() {
+            return String::new();
+        }
+        let [t, r, b, l] = inset;
+        let rule = format!(
+            "[data-fmtagno-b=\"{{N}}\"] {{ position: relative; }}\n\
+             [data-fmtagno-b=\"{{N}}\"]::before {{ content: \"\"; position: absolute; \
+             inset: -{t}pt -{r}pt -{b}pt -{l}pt; pointer-events: none; background: {}; }}\n",
+            layers.join(", ")
+        );
+        let n = match self.tiles.iter().position(|x| *x == rule) {
+            Some(n) => n,
+            None => {
+                self.tiles.push(rule);
+                self.tiles.len() - 1
+            }
+        };
+        format!(" data-fmtagno-b=\"{n}\"")
     }
 
     fn code(&mut self, n: &Node, p: &CodeProps, st: &str) {
@@ -429,10 +527,16 @@ impl Html<'_> {
                     let _ = write!(css, "padding:{pad}pt;");
                 }
                 let tag = if header { "th" } else { "td" };
+                let mark = self.tile_mark([
+                    borders[0].as_ref(),
+                    borders[1].as_ref(),
+                    borders[2].as_ref(),
+                    borders[3].as_ref(),
+                ]);
                 let a = if css.is_empty() {
-                    String::new()
+                    mark
                 } else {
-                    format!(" style=\"{}\"", esc(&css))
+                    format!(" style=\"{}\"{mark}", esc(&css))
                 };
                 let _ = write!(self.out, "<{tag}{a}>");
                 self.inline_in(cells.get(c).unwrap_or(&empty), s, &cs, &n.id);

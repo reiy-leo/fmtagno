@@ -42,6 +42,8 @@ macro_rules! str_enum {
         pub enum $t { $( #[serde(rename = $s)] $v ),* }
         impl $t {
             pub fn as_str(self) -> &'static str { match self { $( $t::$v => $s ),* } }
+            #[allow(dead_code)]
+            pub const NAMES: &'static [&'static str] = &[$($s),*];
         }
     };
 }
@@ -482,14 +484,34 @@ value_type!(LineHeight, "LineHeight", { "anyOf": [
 
 // ---------- 边框 ----------
 
+/// 线型：Word 的全部线型（ST_Border），艺术边框除外。名字照 Word，`single` 叫 `solid`。
 str_enum!(BorderStyle {
     None = "none",
     Solid = "solid",
+    Thick = "thick",
     Dashed = "dashed",
     Dotted = "dotted",
     DashDot = "dashDot",
+    DashDotDot = "dashDotDot",
+    DashSmallGap = "dashSmallGap",
+    DashDotStroked = "dashDotStroked",
     Double = "double",
+    Triple = "triple",
+    ThinThickSmallGap = "thinThickSmallGap",
+    ThickThinSmallGap = "thickThinSmallGap",
+    ThinThickThinSmallGap = "thinThickThinSmallGap",
+    ThinThickMediumGap = "thinThickMediumGap",
+    ThickThinMediumGap = "thickThinMediumGap",
+    ThinThickThinMediumGap = "thinThickThinMediumGap",
+    ThinThickLargeGap = "thinThickLargeGap",
+    ThickThinLargeGap = "thickThinLargeGap",
+    ThinThickThinLargeGap = "thinThickThinLargeGap",
     Wave = "wave",
+    DoubleWave = "doubleWave",
+    ThreeDEmboss = "threeDEmboss",
+    ThreeDEngrave = "threeDEngrave",
+    Outset = "outset",
+    Inset = "inset",
 });
 
 /// 一条边：`{ width, style, color }`，或简写 `"1pt solid #CCCCCC"`，或 `"none"`。
@@ -543,9 +565,7 @@ impl Border {
                         "width" => b.width = Len::from_value(x)?.abs_pt(),
                         "style" => {
                             b.style = serde_json::from_value(x.clone()).map_err(|_| {
-                                anyhow::anyhow!(
-                                    "边框 style 只认 none solid dashed dotted dashDot double wave"
-                                )
+                                anyhow::anyhow!("边框 style 只认 {}", BorderStyle::NAMES.join(" "))
                             })?
                         }
                         "color" => b.color = Color::from_value(x)?,
@@ -571,15 +591,22 @@ impl Border {
         .into()
     }
 
-    /// CSS 的 border 值。
+    /// CSS 的 border 值。CSS 没有的线型（见 `common::border_tile`）先写成透明边，
+    /// 留出位置，图案另外叠上去。
     pub fn css(&self) -> String {
         if self.is_none() {
             return "none".into();
         }
         let st = match self.style {
-            BorderStyle::DashDot => "dashed",
-            BorderStyle::Wave => "solid",
-            s => s.as_str(),
+            BorderStyle::Solid | BorderStyle::Thick => "solid",
+            BorderStyle::Dashed => "dashed",
+            BorderStyle::Dotted => "dotted",
+            BorderStyle::Double => "double",
+            BorderStyle::ThreeDEmboss => "ridge",
+            BorderStyle::ThreeDEngrave => "groove",
+            BorderStyle::Outset => "outset",
+            BorderStyle::Inset => "inset",
+            _ => return format!("{}pt solid transparent", self.width),
         };
         format!("{}pt {} {}", self.width, st, self.color.css())
     }
@@ -589,7 +616,12 @@ value_type!(Border, "Border", { "anyOf": [
     { "type": "string" },
     { "type": "object", "properties": {
         "width": { "type": ["number", "string"] },
-        "style": { "enum": ["none", "solid", "dashed", "dotted", "dashDot", "double", "wave"] },
+        "style": { "enum": ["none", "solid", "thick", "dashed", "dotted", "dashDot", "dashDotDot",
+            "dashSmallGap", "dashDotStroked", "double", "triple",
+            "thinThickSmallGap", "thickThinSmallGap", "thinThickThinSmallGap",
+            "thinThickMediumGap", "thickThinMediumGap", "thinThickThinMediumGap",
+            "thinThickLargeGap", "thickThinLargeGap", "thinThickThinLargeGap",
+            "wave", "doubleWave", "threeDEmboss", "threeDEngrave", "outset", "inset"] },
         "color": { "type": "string" } }, "additionalProperties": false }
 ] });
 

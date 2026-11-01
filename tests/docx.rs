@@ -66,3 +66,18 @@ fn table_header_repeats_and_page_break() {
     let out = fmtagno::render_str(&off, Format::Docx, None).unwrap();
     assert!(!has(&out.bytes, "<w:tblHeader"));
 }
+
+#[test]
+fn word_border_styles_map_through() {
+    let json = include_str!("../examples/borders.json");
+    let out = fmtagno::render_str(json, fmtagno::render::Format::Docx, None).unwrap();
+    for v in [
+        "thinThickThinLargeGap",
+        "doubleWave",
+        "threeDEngrave",
+        "dashDotStroked",
+        "dotDotDash",
+    ] {
+        assert!(has(&out.bytes, &format!("w:val=\"{v}\"")), "缺 {v}");
+    }
+}

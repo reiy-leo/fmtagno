@@ -34,3 +34,10 @@ fn styled_blocks_span_full_width() {
     assert!(src.contains("width: 100%"), "{src}");
     assert!(src.contains("#set align(right)"), "{src}");
 }
+
+#[test]
+fn all_border_styles_render() {
+    let json = include_str!("../examples/borders.json");
+    let out = fmtagno::render_str(json, fmtagno::render::Format::Pdf, None).unwrap();
+    assert!(out.bytes.starts_with(b"%PDF"));
+}

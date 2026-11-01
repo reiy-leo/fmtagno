@@ -430,7 +430,7 @@ impl Markup<'_> {
             .iter()
             .map(|e| s.padding_side(*e).unwrap_or(0.0))
             .collect();
-        let dbl = double_lines(
+        let dbl = tile_overlays(
             [
                 s.border_side(Edge::Top),
                 s.border_side(Edge::Right),
@@ -743,7 +743,8 @@ impl Markup<'_> {
                 let st: Vec<String> = ["top", "right", "bottom", "left"]
                     .iter()
                     .zip(b.iter())
-                    .map(|(k, b)| format!("{k}: {}", stroke(b.as_ref())))
+                    .zip(Edge::ALL)
+                    .map(|((k, b), e)| format!("{k}: {}", stroke(b.as_ref(), e)))
                     .collect();
                 args.push(format!("stroke: ({})", st.join(", ")));
                 let pads: Vec<String> = Edge::ALL
@@ -766,7 +767,7 @@ impl Markup<'_> {
                     .iter()
                     .map(|e| part.padding_side(*e).unwrap_or(pad))
                     .collect();
-                let dbl = double_lines(
+                let dbl = tile_overlays(
                     [b[0].as_ref(), b[1].as_ref(), b[2].as_ref(), b[3].as_ref()],
                     [ins[0], ins[1], ins[2], ins[3]],
                 );
@@ -941,68 +942,72 @@ impl Markup<'_> {
     }
 }
 
-/// 某一边的 typst stroke。
-fn stroke(b: Option<&Border>) -> String {
+/// 某一边的 typst stroke。要用图案画的线型（见 `common::border_tile`）这里不画，交给 tile_overlays。
+fn stroke(b: Option<&Border>, side: Edge) -> String {
     match b {
         None => "none".into(),
         Some(b) if b.is_none() => "none".into(),
+        Some(b) if common::border_tile(b, side).is_some() => "none".into(),
         Some(b) => {
             let dash = match b.style {
                 BorderStyle::Dashed => ", dash: \"dashed\"",
                 BorderStyle::Dotted => ", dash: \"dotted\"",
-                BorderStyle::DashDot => ", dash: \"dash-dotted\"",
                 _ => "",
             };
-            // 双线：Typst 只有单线，这里画外面那条（线宽 1/3），里面那条由 double_lines 补
-            let w = if b.style == BorderStyle::Double {
-                b.width / 3.0
-            } else {
+            format!(
+                "(paint: {}, thickness: {}pt{dash})",
+                color(&b.color),
                 b.width
-            };
-            format!("(paint: {}, thickness: {w}pt{dash})", color(&b.color))
+            )
         }
     }
 }
 
-/// 双线边框里面那条线：按 CSS 的画法，两条线和中间空隙各占线宽的 1/3。
-/// 外线由 stroke 画在边上，这里在盒子内容里用 place 往里挪 2/3 线宽再画一条。
-/// `sides` 按上右下左，`inset` 是盒子的内边距（place 以内容区为准，要先退回边上）。
-fn double_lines(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
+/// 图案边框：每条边放一个线宽高的盒子，用和 HTML 同一份 SVG 图案铺满，盒子中线压在边上
+/// （和 Typst 的 stroke 一样）。盒子放在内容区里，`inset` 是内边距，用来退回到边上。
+/// `sides`、`inset` 都按上右下左。
+fn tile_overlays(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
     let [t, r, b, l] = inset;
     let mut o = String::new();
     for (i, side) in sides.iter().enumerate() {
-        let Some(bd) = side.filter(|x| x.style == BorderStyle::Double && !x.is_none()) else {
+        let e = Edge::ALL[i];
+        let Some(tile) = side.and_then(|x| common::border_tile(x, e)) else {
             continue;
         };
-        let w = bd.width / 3.0;
-        let off = bd.width * 2.0 / 3.0;
-        let st = format!("(paint: {}, thickness: {w}pt)", color(&bd.color));
-        let _ = match i {
-            0 => write!(
+        let (w, p) = (tile.width, tile.period);
+        let vertical = matches!(e, Edge::Left | Edge::Right);
+        let (tw, th) = if vertical { (w, p) } else { (p, w) };
+        let fill = format!(
+            "tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt))",
+            lit(&tile.svg(vertical))
+        );
+        let h = w / 2.0;
+        let _ = match e {
+            Edge::Top => write!(
                 o,
-                "#place(top + left, dx: {}pt, dy: {}pt, line(length: 100% + {}pt, stroke: {st}))",
+                "#place(top + left, dx: {}pt, dy: {}pt, box(width: 100% + {}pt, height: {w}pt, fill: {fill}))",
                 -l,
-                off - t,
+                -t - h,
                 l + r
             ),
-            2 => write!(
+            Edge::Bottom => write!(
                 o,
-                "#place(bottom + left, dx: {}pt, dy: {}pt, line(length: 100% + {}pt, stroke: {st}))",
+                "#place(bottom + left, dx: {}pt, dy: {}pt, box(width: 100% + {}pt, height: {w}pt, fill: {fill}))",
                 -l,
-                b - off,
+                b + h,
                 l + r
             ),
-            1 => write!(
+            Edge::Left => write!(
                 o,
-                "#place(top + right, dx: {}pt, dy: {}pt, line(angle: 90deg, length: 100% + {}pt, stroke: {st}))",
-                r - off,
+                "#place(top + left, dx: {}pt, dy: {}pt, box(width: {w}pt, height: 100% + {}pt, fill: {fill}))",
+                -l - h,
                 -t,
                 t + b
             ),
-            _ => write!(
+            Edge::Right => write!(
                 o,
-                "#place(top + left, dx: {}pt, dy: {}pt, line(angle: 90deg, length: 100% + {}pt, stroke: {st}))",
-                off - l,
+                "#place(top + right, dx: {}pt, dy: {}pt, box(width: {w}pt, height: 100% + {}pt, fill: {fill}))",
+                r + h,
                 -t,
                 t + b
             ),
@@ -1017,7 +1022,7 @@ fn strokes(s: &Style) -> Vec<String> {
         .zip(["top", "right", "bottom", "left"])
         .filter_map(|(e, k)| {
             s.border_side(*e)
-                .map(|b| format!("{k}: {}", stroke(Some(b))))
+                .map(|b| format!("{k}: {}", stroke(Some(b), *e)))
         })
         .collect()
 }
