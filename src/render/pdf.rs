@@ -426,20 +426,14 @@ impl Markup<'_> {
         if s.page_break_before == Some(true) {
             src.push_str("#pagebreak(weak: true)\n");
         }
-        let ins: Vec<f32> = Edge::ALL
-            .iter()
-            .map(|e| s.padding_side(*e).unwrap_or(0.0))
-            .collect();
-        let dbl = tile_overlays(
-            [
-                s.border_side(Edge::Top),
-                s.border_side(Edge::Right),
-                s.border_side(Edge::Bottom),
-                s.border_side(Edge::Left),
-            ],
-            [ins[0], ins[1], ins[2], ins[3]],
-        );
-        let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
+        let inner = match tile_grid(s, &sets, &body) {
+            // 有图案边：内边距挪进网格中间那格，block 本身不要 inset
+            Some(grid) => {
+                args.retain(|a| !a.starts_with("inset:"));
+                format!("#block({})[\n{grid}\n]", args.join(", "))
+            }
+            None => format!("#block({})[\n{sets}{body}\n]", args.join(", ")),
+        };
         let ml = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         let mr = s.margin_right.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         if ml != 0.0 || mr != 0.0 {
@@ -963,7 +957,60 @@ fn stroke(b: Option<&Border>, side: Edge) -> String {
     }
 }
 
-/// 图案边框：每条边放一个线宽高的盒子，用和 HTML 同一份 SVG 图案铺满，盒子中线压在边上
+/// 块的图案边框：用 3×3 网格把内容围起来，四边那几格用图案填满（格子的 fill 跟着行高走，
+/// 跨页也能接上）。和 HTML 一样，线画在盒子里面、内边距外面；角上用横边的图案。
+/// 没有图案边时返回 None。
+fn tile_grid(s: &Style, sets: &str, body: &str) -> Option<String> {
+    let mut fills: [Option<String>; 4] = Default::default();
+    let mut w = [0.0f32; 4];
+    for (i, e) in Edge::ALL.iter().enumerate() {
+        let Some(b) = s.border_side(*e) else { continue };
+        let Some(t) = common::border_tile(b, *e) else {
+            continue;
+        };
+        w[i] = t.width;
+        fills[i] = Some(tile_fill(&t, matches!(e, Edge::Left | Edge::Right)));
+    }
+    if fills.iter().all(Option::is_none) {
+        return None;
+    }
+    let pads: Vec<String> = Edge::ALL
+        .iter()
+        .zip(["top", "right", "bottom", "left"])
+        .map(|(e, k)| format!("{k}: {}pt", s.padding_side(*e).unwrap_or(0.0)))
+        .collect();
+    let cell = |f: &Option<String>, span: usize| match f {
+        Some(f) => format!("grid.cell(colspan: {span}, fill: {f})[]"),
+        None => format!("grid.cell(colspan: {span})[]"),
+    };
+    Some(format!(
+        "{sets}#grid(columns: ({}pt, 1fr, {}pt), rows: ({}pt, auto, {}pt), {}, {}, block(width: 100%, inset: ({}))[{body}], {}, {})",
+        w[3],
+        w[1],
+        w[0],
+        w[2],
+        cell(&fills[0], 3),
+        cell(&fills[3], 1),
+        pads.join(", "),
+        cell(&fills[1], 1),
+        cell(&fills[2], 3),
+    ))
+}
+
+/// 用 SVG 图案铺满的 tiling。
+fn tile_fill(t: &common::Tile, vertical: bool) -> String {
+    let (tw, th) = if vertical {
+        (t.width, t.period)
+    } else {
+        (t.period, t.width)
+    };
+    format!(
+        "tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt))",
+        lit(&t.svg(vertical))
+    )
+}
+
+/// 表格格子的图案边框：每条边放一个线宽高的盒子，用和 HTML 同一份 SVG 图案铺满，盒子中线压在边上
 /// （和 Typst 的 stroke 一样）。盒子放在内容区里，`inset` 是内边距，用来退回到边上。
 /// `sides`、`inset` 都按上右下左。
 fn tile_overlays(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
@@ -974,13 +1021,8 @@ fn tile_overlays(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
         let Some(tile) = side.and_then(|x| common::border_tile(x, e)) else {
             continue;
         };
-        let (w, p) = (tile.width, tile.period);
-        let vertical = matches!(e, Edge::Left | Edge::Right);
-        let (tw, th) = if vertical { (w, p) } else { (p, w) };
-        let fill = format!(
-            "tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt))",
-            lit(&tile.svg(vertical))
-        );
+        let w = tile.width;
+        let fill = tile_fill(&tile, matches!(e, Edge::Left | Edge::Right));
         let h = w / 2.0;
         let _ = match e {
             Edge::Top => write!(

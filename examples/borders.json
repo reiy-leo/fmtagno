@@ -361,7 +361,8 @@
         }
       },
       "style": {
-        "border": "0.5pt solid #999999"
+        "border": "0.5pt solid #999999",
+        "borderInsideV": "1.5pt dashDotDot #999999"
       },
       "parts": {
         "lastRow": {
