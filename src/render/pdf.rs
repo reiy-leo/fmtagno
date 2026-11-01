@@ -50,6 +50,9 @@ const FONTS: &[&str] = &[
 const MONO_FONTS: &[&str] = &["Menlo", "Consolas", "DejaVu Sans Mono"];
 /// 文字盒高度（ascender 到 descender）约等于字号的这么多倍，用来把行高倍数换成 typst 的 leading。
 const GLYPH_BOX: f32 = 1.17;
+/// 行盒基线以上、以下的部分（合起来是 GLYPH_BOX），按常见中文字体估的。
+const ASCENT: f32 = 0.88;
+const DESCENT: f32 = 0.29;
 
 pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> {
     let (source, files, mut warnings) = markup(doc, tree, opts);
@@ -292,13 +295,20 @@ impl Markup<'_> {
         if (changed!(line_height) || changed!(font_size))
             && let Some(l) = s.line_height
         {
-            let lead = match l {
-                LineHeight::Multiple(x) => (x - GLYPH_BOX).max(0.0) * fs,
+            // 像 CSS 那样把多出来的行距对半分到每行上下（half-leading），
+            // 单行的段落、列表项也就有了行高，和 HTML、Word 的间距对得上。
+            // 行间距交给行盒，leading 归零。
+            let half = match l {
+                LineHeight::Multiple(x) => format!("{:.3}em", ((x - GLYPH_BOX) / 2.0).max(0.0)),
                 LineHeight::Exact(x) | LineHeight::AtLeast(x) => {
-                    (x.pt(fs, 0.0) - GLYPH_BOX * fs).max(0.0)
+                    format!("{:.2}pt", ((x.pt(fs, 0.0) - GLYPH_BOX * fs) / 2.0).max(0.0))
                 }
             };
-            par.push(format!("leading: {lead:.2}pt"));
+            let _ = writeln!(
+                sets,
+                "#set text(top-edge: {ASCENT}em + {half}, bottom-edge: -{DESCENT}em - {half})"
+            );
+            par.push("leading: 0pt".into());
         }
         if changed!(align) {
             match s.align {
@@ -416,7 +426,20 @@ impl Markup<'_> {
         if s.page_break_before == Some(true) {
             src.push_str("#pagebreak(weak: true)\n");
         }
-        let inner = format!("#block({})[\n{sets}{body}\n]", args.join(", "));
+        let ins: Vec<f32> = Edge::ALL
+            .iter()
+            .map(|e| s.padding_side(*e).unwrap_or(0.0))
+            .collect();
+        let dbl = double_lines(
+            [
+                s.border_side(Edge::Top),
+                s.border_side(Edge::Right),
+                s.border_side(Edge::Bottom),
+                s.border_side(Edge::Left),
+            ],
+            [ins[0], ins[1], ins[2], ins[3]],
+        );
+        let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
         let ml = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         let mr = s.margin_right.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         if ml != 0.0 || mr != 0.0 {
@@ -556,7 +579,7 @@ impl Markup<'_> {
         }
         if let Some(bg) = &s.background {
             piece = format!(
-                "#box(fill: {}, inset: (x: 2pt), outset: (y: 2pt), radius: 2pt)[{piece}]",
+                "#box(fill: {}, inset: (x: 2pt), outset: (y: 2pt), radius: 2pt)[#set text(top-edge: \"ascender\", bottom-edge: \"descender\");{piece}]",
                 bg_src(bg)
             );
         }
@@ -739,7 +762,15 @@ impl Markup<'_> {
                         }
                     ));
                 }
-                let cell = format!("table.cell({})[{sets}{text}]", args.join(", "));
+                let ins: Vec<f32> = Edge::ALL
+                    .iter()
+                    .map(|e| part.padding_side(*e).unwrap_or(pad))
+                    .collect();
+                let dbl = double_lines(
+                    [b[0].as_ref(), b[1].as_ref(), b[2].as_ref(), b[3].as_ref()],
+                    [ins[0], ins[1], ins[2], ins[3]],
+                );
+                let cell = format!("table.cell({})[{dbl}{sets}{text}]", args.join(", "));
                 if g.has_header && r == 0 {
                     header.push(cell);
                 } else {
@@ -922,13 +953,62 @@ fn stroke(b: Option<&Border>) -> String {
                 BorderStyle::DashDot => ", dash: \"dash-dotted\"",
                 _ => "",
             };
-            format!(
-                "(paint: {}, thickness: {}pt{dash})",
-                color(&b.color),
+            // 双线：Typst 只有单线，这里画外面那条（线宽 1/3），里面那条由 double_lines 补
+            let w = if b.style == BorderStyle::Double {
+                b.width / 3.0
+            } else {
                 b.width
-            )
+            };
+            format!("(paint: {}, thickness: {w}pt{dash})", color(&b.color))
         }
     }
+}
+
+/// 双线边框里面那条线：按 CSS 的画法，两条线和中间空隙各占线宽的 1/3。
+/// 外线由 stroke 画在边上，这里在盒子内容里用 place 往里挪 2/3 线宽再画一条。
+/// `sides` 按上右下左，`inset` 是盒子的内边距（place 以内容区为准，要先退回边上）。
+fn double_lines(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
+    let [t, r, b, l] = inset;
+    let mut o = String::new();
+    for (i, side) in sides.iter().enumerate() {
+        let Some(bd) = side.filter(|x| x.style == BorderStyle::Double && !x.is_none()) else {
+            continue;
+        };
+        let w = bd.width / 3.0;
+        let off = bd.width * 2.0 / 3.0;
+        let st = format!("(paint: {}, thickness: {w}pt)", color(&bd.color));
+        let _ = match i {
+            0 => write!(
+                o,
+                "#place(top + left, dx: {}pt, dy: {}pt, line(length: 100% + {}pt, stroke: {st}))",
+                -l,
+                off - t,
+                l + r
+            ),
+            2 => write!(
+                o,
+                "#place(bottom + left, dx: {}pt, dy: {}pt, line(length: 100% + {}pt, stroke: {st}))",
+                -l,
+                b - off,
+                l + r
+            ),
+            1 => write!(
+                o,
+                "#place(top + right, dx: {}pt, dy: {}pt, line(angle: 90deg, length: 100% + {}pt, stroke: {st}))",
+                r - off,
+                -t,
+                t + b
+            ),
+            _ => write!(
+                o,
+                "#place(top + left, dx: {}pt, dy: {}pt, line(angle: 90deg, length: 100% + {}pt, stroke: {st}))",
+                off - l,
+                -t,
+                t + b
+            ),
+        };
+    }
+    o
 }
 
 fn strokes(s: &Style) -> Vec<String> {
