@@ -347,6 +347,9 @@ pub struct Tile {
     /// 线宽，pt
     pub width: f32,
     body: String,
+    /// 沿边不断的线（双线、三线、粗细线、立体线）：每条是 (离上边或左边的距离, 粗细, 颜色)。
+    /// PDF 直接画成矩形，免得 tiling 拼缝；虚线、波浪线这里是空的。
+    pub stripes: Vec<(f32, f32, String)>,
 }
 
 impl Tile {
@@ -396,10 +399,11 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
     // 横条纹：单位长度依次是 线、空、线……
     let stripes = |units: &[f32]| {
         let k = w / units.iter().sum::<f32>();
-        let (mut y, mut o) = (0.0, String::new());
+        let (mut y, mut o, mut st) = (0.0, String::new(), Vec::new());
         for (i, u) in units.iter().enumerate() {
             if i % 2 == 0 {
                 o.push_str(&rect(0.0, y, 4.0, u * k, &c));
+                st.push((y, u * k, c.clone()));
             }
             y += u * k;
         }
@@ -407,6 +411,7 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
             period: 4.0,
             width: w,
             body: o,
+            stripes: st,
         }
     };
     // 沿边的虚线段：长度依次是 画、空、画……
@@ -423,6 +428,7 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
             period: x,
             width: w,
             body: o,
+            stripes: Vec::new(),
         }
     };
     let wave = |y0: f32, h: f32, p: f32| {
@@ -445,6 +451,10 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
             rect(0.0, 0.0, 4.0, w / 2.0, a),
             rect(0.0, w / 2.0, 4.0, w / 2.0, z)
         ),
+        stripes: vec![
+            (0.0, w / 2.0, a.to_string()),
+            (w / 2.0, w / 2.0, z.to_string()),
+        ],
     };
     let top_left = matches!(side, Edge::Top | Edge::Left);
     Some(match b.style {
@@ -479,6 +489,7 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
                 period: 6.0 * u,
                 width: w,
                 body: format!("{}{}", poly(0.0, 3.0 * u), poly(4.0 * u, u)),
+                stripes: Vec::new(),
             }
         }
         S::Wave => {
@@ -487,6 +498,7 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
                 period: p,
                 width: w,
                 body: wave(0.0, w, p),
+                stripes: Vec::new(),
             }
         }
         S::DoubleWave => {
@@ -495,6 +507,7 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
                 period: p,
                 width: w,
                 body: format!("{}{}", wave(0.0, w / 2.0, p), wave(w / 2.0, w / 2.0, p)),
+                stripes: Vec::new(),
             }
         }
         // 立体线：凸起是外亮内暗，凹陷反过来；y = 0 不随边翻转，所以四边都是同一个上下顺序
@@ -507,6 +520,7 @@ pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
                 period: 4.0,
                 width: w,
                 body: rect(0.0, 0.0, 4.0, w, &fill),
+                stripes: vec![(0.0, w, fill)],
             }
         }
     })

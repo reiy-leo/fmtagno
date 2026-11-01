@@ -969,7 +969,12 @@ fn tile_grid(s: &Style, sets: &str, body: &str) -> Option<String> {
             continue;
         };
         w[i] = t.width;
-        fills[i] = Some(tile_fill(&t, matches!(e, Edge::Left | Edge::Right)));
+        fills[i] = Some(band(
+            &t,
+            matches!(e, Edge::Left | Edge::Right),
+            "100%",
+            "100%",
+        ));
     }
     if fills.iter().all(Option::is_none) {
         return None;
@@ -980,7 +985,7 @@ fn tile_grid(s: &Style, sets: &str, body: &str) -> Option<String> {
         .map(|(e, k)| format!("{k}: {}pt", s.padding_side(*e).unwrap_or(0.0)))
         .collect();
     let cell = |f: &Option<String>, span: usize| match f {
-        Some(f) => format!("grid.cell(colspan: {span}, fill: {f})[]"),
+        Some(f) => format!("grid.cell(colspan: {span})[#{f}]"),
         None => format!("grid.cell(colspan: {span})[]"),
     };
     Some(format!(
@@ -997,15 +1002,33 @@ fn tile_grid(s: &Style, sets: &str, body: &str) -> Option<String> {
     ))
 }
 
-/// 用 SVG 图案铺满的 tiling。
-fn tile_fill(t: &common::Tile, vertical: bool) -> String {
+/// 一条边的图案盒子，宽高由调用方给（Typst 长度表达式）。
+/// 不断的线直接画矩形；虚线、波浪线用 SVG 图案铺（tiling）。
+fn band(t: &common::Tile, vertical: bool, width: &str, height: &str) -> String {
+    if !t.stripes.is_empty() {
+        let mut o = String::new();
+        for (off, th, c) in &t.stripes {
+            let _ = if vertical {
+                write!(
+                    o,
+                    "#place(top + left, dx: {off}pt, rect(width: {th}pt, height: 100%, fill: rgb(\"{c}\"), stroke: none))"
+                )
+            } else {
+                write!(
+                    o,
+                    "#place(top + left, dy: {off}pt, rect(width: 100%, height: {th}pt, fill: rgb(\"{c}\"), stroke: none))"
+                )
+            };
+        }
+        return format!("box(width: {width}, height: {height})[{o}]");
+    }
     let (tw, th) = if vertical {
         (t.width, t.period)
     } else {
         (t.period, t.width)
     };
     format!(
-        "tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt))",
+        "box(width: {width}, height: {height}, fill: tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt)))",
         lit(&t.svg(vertical))
     )
 }
@@ -1022,36 +1045,45 @@ fn tile_overlays(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
             continue;
         };
         let w = tile.width;
-        let fill = tile_fill(&tile, matches!(e, Edge::Left | Edge::Right));
+        let vertical = matches!(e, Edge::Left | Edge::Right);
+        let hb = |len: f32| band(&tile, false, &format!("100% + {len}pt"), &format!("{w}pt"));
+        let vb = |len: f32| {
+            band(
+                &tile,
+                vertical,
+                &format!("{w}pt"),
+                &format!("100% + {len}pt"),
+            )
+        };
         let h = w / 2.0;
         let _ = match e {
             Edge::Top => write!(
                 o,
-                "#place(top + left, dx: {}pt, dy: {}pt, box(width: 100% + {}pt, height: {w}pt, fill: {fill}))",
+                "#place(top + left, dx: {}pt, dy: {}pt, {}))",
                 -l,
                 -t - h,
-                l + r
+                hb(l + r)
             ),
             Edge::Bottom => write!(
                 o,
-                "#place(bottom + left, dx: {}pt, dy: {}pt, box(width: 100% + {}pt, height: {w}pt, fill: {fill}))",
+                "#place(bottom + left, dx: {}pt, dy: {}pt, {}))",
                 -l,
                 b + h,
-                l + r
+                hb(l + r)
             ),
             Edge::Left => write!(
                 o,
-                "#place(top + left, dx: {}pt, dy: {}pt, box(width: {w}pt, height: 100% + {}pt, fill: {fill}))",
+                "#place(top + left, dx: {}pt, dy: {}pt, {}))",
                 -l - h,
                 -t,
-                t + b
+                vb(t + b)
             ),
             Edge::Right => write!(
                 o,
-                "#place(top + right, dx: {}pt, dy: {}pt, box(width: {w}pt, height: 100% + {}pt, fill: {fill}))",
+                "#place(top + right, dx: {}pt, dy: {}pt, {}))",
                 r + h,
                 -t,
-                t + b
+                vb(t + b)
             ),
         };
     }
