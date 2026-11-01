@@ -484,8 +484,9 @@ value_type!(LineHeight, "LineHeight", { "anyOf": [
 
 // ---------- 边框 ----------
 
-/// 线型：Word 的全部线型（ST_Border），艺术边框除外。名字照 Word，`single` 叫 `solid`。
-str_enum!(BorderStyle {
+str_enum!(
+    /// 线型：Word 的全部线型（ST_Border），艺术边框除外。名字照 Word，`single` 叫 `solid`。
+    BorderStyle {
     None = "none",
     Solid = "solid",
     Thick = "thick",

@@ -116,8 +116,8 @@ fn pattern_borders_use_svg_overlay() {
     let out = fmtagno::render_str(json, fmtagno::render::Format::Html, None).unwrap();
     let s = String::from_utf8(out.bytes).unwrap();
     // 原生能画的照旧
-    assert!(s.contains("3pt double #1a73e8"));
-    assert!(s.contains("3pt ridge #1a73e8"));
+    assert!(s.contains("3pt double #1A73E8"));
+    assert!(s.contains("3pt ridge #1A73E8"));
     // 图案线：透明边 + ::before 贴 SVG
     assert!(s.contains("3pt solid transparent"));
     assert!(s.contains("data-fmtagno-b=\"0\""));
