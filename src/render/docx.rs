@@ -85,6 +85,16 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         .any(|(l, _)| !l.header.is_empty() || !l.footer.is_empty());
     let even_odd = sections.iter().any(|(l, _)| l.even_odd);
     let last = sections.len().saturating_sub(1);
+    let cols: Vec<Option<(u8, f32)>> = sections
+        .iter()
+        .map(|(l, _)| {
+            l.page
+                .columns
+                .as_ref()
+                .filter(|c| c.count() > 1)
+                .map(|c| (c.count(), c.gap_pt()))
+        })
+        .collect();
     for (i, (lay, blocks)) in sections.into_iter().enumerate() {
         let page = &lay.page;
         let (w, h) = page.dims_pt(&mut Vec::new());
@@ -111,22 +121,29 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
                     Block::T(t) => sec.add_table(t),
                 };
             }
+            docx = docx.add_section(sec);
+            // docx-rs 的 add_section 一节只留得住一个页眉或页脚（处理完第一个就把其余的丢了），
+            // 所以每个页眉页脚单独挂在一个占位节上，生成 XML 后再挪回真正的节（fix_sections）
             if let Some(hf) = hf {
-                sec = sec.header(hf.header).footer(hf.footer);
+                let dummy = || {
+                    docx_rs::Section::new()
+                        .page_size(docx_rs::PageSize::new().size(DUMMY_PAGE, DUMMY_PAGE))
+                };
+                docx = docx.add_section(dummy().header(hf.header));
+                docx = docx.add_section(dummy().footer(hf.footer));
                 if let Some(x) = hf.first_header {
-                    sec = sec.first_header(x);
+                    docx = docx.add_section(dummy().first_header(x));
                 }
                 if let Some(x) = hf.first_footer {
-                    sec = sec.first_footer(x);
+                    docx = docx.add_section(dummy().first_footer(x));
                 }
                 if let Some(x) = hf.even_header {
-                    sec = sec.even_header(x);
+                    docx = docx.add_section(dummy().even_header(x));
                 }
                 if let Some(x) = hf.even_footer {
-                    sec = sec.even_footer(x);
+                    docx = docx.add_section(dummy().even_footer(x));
                 }
             }
-            docx = docx.add_section(sec);
         } else {
             for b in blocks {
                 docx = match b {
@@ -167,6 +184,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
     }
     let mut xml = docx.build();
     xml.document = mark_table_headers(&xml.document, &r.repeat_heads);
+    xml.document = fix_sections(&xml.document, &cols);
     let mut buf = std::io::Cursor::new(Vec::new());
     xml.pack(&mut buf)?;
     Ok(Output {
@@ -198,6 +216,133 @@ struct HeaderSet {
     first_footer: Option<Footer>,
     even_header: Option<Header>,
     even_footer: Option<Footer>,
+}
+
+/// 占位节的纸张边长（twip），用来在 XML 里认出占位节。
+const DUMMY_PAGE: u32 = 1;
+
+/// 收拾 docx-rs 生成的分节：
+/// 1. 把占位节（纸张 1×1）上的页眉页脚引用挪到它前面那个真正的节上，删掉占位节的段落；
+/// 2. sectPr 里的子元素按 OOXML 规定的顺序排（headerReference 在最前，titlePg 在 cols 后面）；
+/// 3. 按 `cols` 写分栏（docx-rs 的 Section 不让设）。
+fn fix_sections(doc: &[u8], cols: &[Option<(u8, f32)>]) -> Vec<u8> {
+    let Ok(xml) = std::str::from_utf8(doc) else {
+        return doc.to_vec();
+    };
+    const OPEN: &str = "<w:sectPr>";
+    const CLOSE: &str = "</w:sectPr>";
+    let dummy_size = format!("<w:pgSz w:w=\"{DUMMY_PAGE}\" w:h=\"{DUMMY_PAGE}\"");
+    // 第一遍：挪引用、删占位节
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    // 上一个真正的节在 out 里的 <w:sectPr> 之后的位置
+    let mut last_real: Option<usize> = None;
+    while let Some(i) = rest.find(OPEN) {
+        let Some(j) = rest[i..].find(CLOSE).map(|j| i + j) else {
+            break;
+        };
+        let body = &rest[i + OPEN.len()..j];
+        if body.contains(&dummy_size)
+            && let Some(at) = last_real
+            && let Some(p) = rest[..i].rfind("<w:p ")
+            && let Some(after) = rest[j..].strip_prefix(CLOSE)
+            && let Some(after) = after.strip_prefix("</w:pPr></w:p>")
+        {
+            out.push_str(&rest[..p]);
+            let refs: String = elements(body)
+                .into_iter()
+                .filter(|e| {
+                    e.starts_with("<w:headerReference") || e.starts_with("<w:footerReference")
+                })
+                .collect();
+            out.insert_str(at, &refs);
+            rest = after;
+            continue;
+        }
+        out.push_str(&rest[..i + OPEN.len()]);
+        last_real = Some(out.len());
+        out.push_str(&rest[i + OPEN.len()..j]);
+        rest = &rest[j..];
+    }
+    out.push_str(rest);
+    // 第二遍：排顺序、写分栏
+    const ORDER: &[&str] = &[
+        "headerReference",
+        "footerReference",
+        "footnotePr",
+        "endnotePr",
+        "type",
+        "pgSz",
+        "pgMar",
+        "paperSrc",
+        "pgBorders",
+        "lnNumType",
+        "pgNumType",
+        "cols",
+        "formProt",
+        "vAlign",
+        "noEndnote",
+        "titlePg",
+        "textDirection",
+        "bidi",
+        "rtlGutter",
+        "docGrid",
+    ];
+    let mut done = String::with_capacity(out.len());
+    let mut rest = out.as_str();
+    let mut n = 0;
+    while let Some(i) = rest.find(OPEN) {
+        let Some(j) = rest[i..].find(CLOSE).map(|j| i + j) else {
+            break;
+        };
+        done.push_str(&rest[..i + OPEN.len()]);
+        let body = &rest[i + OPEN.len()..j];
+        let mut els = elements(body);
+        if els.concat().len() == body.len() {
+            if let Some(Some((count, gap))) = cols.get(n) {
+                let c = format!(
+                    "<w:cols w:space=\"{}\" w:num=\"{count}\" />",
+                    units::twip(*gap)
+                );
+                match els.iter_mut().find(|e| e.starts_with("<w:cols ")) {
+                    Some(e) => *e = c,
+                    None => els.push(c),
+                }
+            }
+            let rank = |e: &String| {
+                let name = e[3..].split([' ', '/', '>']).next().unwrap_or("");
+                ORDER.iter().position(|x| *x == name).unwrap_or(ORDER.len())
+            };
+            els.sort_by_key(rank);
+            done.push_str(&els.concat());
+        } else {
+            // 有不认识的写法（带子元素的），原样留着
+            done.push_str(body);
+        }
+        n += 1;
+        rest = &rest[j..];
+    }
+    done.push_str(rest);
+    done.into_bytes()
+}
+
+/// sectPr 里自闭合的子元素，按原顺序。
+fn elements(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = body;
+    while let Some(i) = rest.find("<w:") {
+        let Some(j) = rest[i..].find("/>").map(|j| i + j + 2) else {
+            break;
+        };
+        let e = &rest[i..j];
+        if e[1..].contains('<') {
+            // 不是自闭合的，交给调用方原样处理
+            break;
+        }
+        out.push(e.to_string());
+        rest = &rest[j..];
+    }
+    out
 }
 
 /// 给要重复的表头行补上 `<w:tblHeader />`：Word 跨页时会在新页顶上再画一遍这一行。
