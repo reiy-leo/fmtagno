@@ -67,7 +67,12 @@ fn command_line_style_set_wins() {
     };
     let (_, tree) = fmtagno::prepare(SETS, &env).unwrap();
     assert_eq!(
-        tree.children[0].children[0].style.color.as_ref().unwrap().rgb(),
+        tree.children[0].children[0]
+            .style
+            .color
+            .as_ref()
+            .unwrap()
+            .rgb(),
         "111111"
     );
 }

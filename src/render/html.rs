@@ -68,7 +68,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         r.out.push_str(PAGED_JS);
         r.out.push_str("\n</script>\n<script>\n");
         r.out.push_str(PAGED_REPEAT_THEAD);
-        r.out.push_str("\n");
+        r.out.push('\n');
         r.out.push_str(PAGED_HF);
         r.out.push_str("\n</script>\n");
     }
