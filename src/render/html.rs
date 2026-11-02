@@ -193,6 +193,8 @@ const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
       }
       fill(x.p.element, x);
     }
+    // 排完的标记，截图、打印脚本可以等它
+    document.documentElement.dataset.fmtagnoReady = '1';
   }
 }
 Paged.registerHandlers(FmtagnoHeaders);"#;

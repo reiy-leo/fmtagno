@@ -448,9 +448,6 @@ impl Ctx<'_> {
                 let [_, mr, _, ml] = page.margins_pt();
                 let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
                 self.content_width_pt = w - ml - mr - gutter;
-                if page.columns.as_ref().is_some_and(|c| c.count() > 1) {
-                    self.warn.unsupported(FORMAT, "分栏（columns）", &n.id);
-                }
                 let saved = std::mem::take(&mut self.blocks);
                 self.children(n);
                 let blocks = std::mem::replace(&mut self.blocks, saved);
