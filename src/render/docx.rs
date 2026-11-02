@@ -4,14 +4,14 @@
 use std::str::FromStr;
 
 use docx_rs::{
-    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, DrawingPosition, Hyperlink,
-    HyperlinkType, IndentLevel, Level, LevelJc, LevelSuffixType, LevelText, LineSpacing,
-    LineSpacingType, NumberFormat, Numbering, NumberingId, PageMargin, Paragraph, ParagraphBorder,
-    ParagraphBorderPosition, ParagraphBorders, Pic, PicAlign, RelativeFromHType, RelativeFromVType,
-    Run, RunFonts, Shading, ShdType, SpecialIndentType, Start, Style, StyleType, Table, TableCell,
-    TableCellBorder, TableCellBorderPosition, TableCellBorders, TableCellMargins, TableLayoutType,
-    TableRow, TextDirectionType, VAlignType, VertAlignType, WidthType, FieldCharType, Footer,
-    Header, InstrNUMPAGES, InstrPAGE, InstrText, PageNumType, PageOrientationType,
+    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, DrawingPosition, FieldCharType,
+    Footer, Header, Hyperlink, HyperlinkType, IndentLevel, InstrNUMPAGES, InstrPAGE, InstrText,
+    Level, LevelJc, LevelSuffixType, LevelText, LineSpacing, LineSpacingType, NumberFormat,
+    Numbering, NumberingId, PageMargin, PageNumType, PageOrientationType, Paragraph,
+    ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, PicAlign, RelativeFromHType,
+    RelativeFromVType, Run, RunFonts, Shading, ShdType, SpecialIndentType, Start, Style, StyleType,
+    Table, TableCell, TableCellBorder, TableCellBorderPosition, TableCellBorders, TableCellMargins,
+    TableLayoutType, TableRow, TextDirectionType, VAlignType, VertAlignType, WidthType,
 };
 
 use crate::{
@@ -96,11 +96,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
                 PageOrientationType::Portrait
             });
         let margin = page_margin(page);
-        let hf = if any_hf {
-            Some(r.headers(&lay))
-        } else {
-            None
-        };
+        let hf = if any_hf { Some(r.headers(&lay)) } else { None };
         if i < last {
             let mut sec = docx_rs::Section::new().page_size(size).page_margin(margin);
             if lay.title_page {

@@ -300,7 +300,13 @@ impl Html<'_> {
             .columns
             .as_ref()
             .filter(|c| c.count() > 1)
-            .map(|c| format!(" column-count: {}; column-gap: {}pt;", c.count(), c.gap_pt()))
+            .map(|c| {
+                format!(
+                    " column-count: {}; column-gap: {}pt;",
+                    c.count(),
+                    c.gap_pt()
+                )
+            })
             .unwrap_or_default();
         let _ = writeln!(
             self.sec_css,

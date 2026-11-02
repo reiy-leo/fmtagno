@@ -314,9 +314,7 @@ impl Markup<'_> {
             } else {
                 (format!("(bottom: {dist}pt)"), "bottom")
             };
-            format!(
-                "block(width: 100%, height: 100%, inset: {inset}, align({align}, [\n{body}]))"
-            )
+            format!("block(width: 100%, height: 100%, inset: {inset}, align({align}, [\n{body}]))")
         };
         let default = one(self, set.default.as_ref());
         let mut src = String::from("context { let i = fmtagno-info(); ");

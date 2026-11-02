@@ -109,13 +109,25 @@ pub enum HfDef {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HfParts {
-    #[serde(default, deserialize_with = "patch", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "patch",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schemars(with = "Option<String>")]
     pub default: Option<Option<String>>,
-    #[serde(default, deserialize_with = "patch", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "patch",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schemars(with = "Option<String>")]
     pub first: Option<Option<String>>,
-    #[serde(default, deserialize_with = "patch", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "patch",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schemars(with = "Option<String>")]
     pub even: Option<Option<String>>,
 }
@@ -511,7 +523,8 @@ impl Doc {
             sets.push((page.clone(), header.clone(), footer.clone(), start));
         }
         let even_odd = sets.iter().any(|(_, h, f, _)| {
-            h.even.as_ref().is_some_and(|e| e.is_some()) || f.even.as_ref().is_some_and(|e| e.is_some())
+            h.even.as_ref().is_some_and(|e| e.is_some())
+                || f.even.as_ref().is_some_and(|e| e.is_some())
         });
 
         // 页眉页脚里的元素：每个只建一次，各节共用
