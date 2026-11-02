@@ -27,7 +27,6 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         warn: Warn::default(),
         opts,
         sec_css: String::new(),
-        print_css: String::new(),
     };
     let lang = doc.meta.lang.as_deref().unwrap_or("zh-CN");
     let title = doc.meta.title.as_deref().unwrap_or("fmtagno");
@@ -75,7 +74,6 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
     }
     r.out.push_str("</body>\n</html>\n");
     r.out = r.out.replacen("/*fmtagno-sections*/\n", &r.sec_css, 1);
-    r.out = r.out.replacen("/*fmtagno-print-pages*/", &r.print_css, 1);
     Output {
         bytes: r.out.into_bytes(),
         warnings: r.warn.list,
@@ -136,7 +134,7 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
 .pagedjs_pagebox { position: relative; }
 .fmtagno-hf-box { position: absolute; }
 @media print { body { background: none; } }
-/*fmtagno-print-pages*/</style>
+</style>
 <style>
 /* Paged.js 不认空 div 上的 break-after，改成让下一个元素从新页开始 */
 .fmtagno-pagebreak + * { break-before: page; }
@@ -207,9 +205,6 @@ struct Html<'a> {
     opts: &'a Options,
     /// 各节的 @page 和分栏规则，最后填进 <style>
     sec_css: String,
-    /// --paged 打印时每节的纸张：Paged.js 只留一个 @page 尺寸，
-    /// 横竖混排时要让它排好的每页再按自己那节的尺寸打印
-    print_css: String,
 }
 
 impl Html<'_> {
@@ -302,11 +297,6 @@ impl Html<'_> {
             self.sec_css,
             "@page fmtagno-s{i} {{ size: {w}pt {h}pt; margin: {mt}pt {mr}pt {mb}pt {}pt; }}",
             ml + gutter
-        );
-        let _ = writeln!(
-            self.print_css,
-            "@page fmtagno-p{i} {{ size: {w}pt {h}pt; margin: 0; }}\n\
-             @media print {{ .pagedjs_fmtagno-s{i}_page {{ page: fmtagno-p{i}; }} }}"
         );
         let cols = page
             .columns

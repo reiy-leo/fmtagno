@@ -1095,14 +1095,18 @@ impl Ctx<'_> {
                     Field::SectionPages => InstrText::Unsupported("SECTIONPAGES".into()),
                 };
                 let shown = if r.text.is_empty() { "1" } else { &r.text };
-                run = run
-                    .add_field_char(FieldCharType::Begin, true)
-                    .add_instr_text(instr)
-                    .add_field_char(FieldCharType::Separate, false)
-                    .add_text(shown)
-                    .add_field_char(FieldCharType::End, false);
-                let run = self.run_props(run, s, id);
-                p = p.add_run(run);
+                // 每一部分单独一个 run 并带上文字属性，域结果才会用这些属性显示
+                let parts = [
+                    Run::new().add_field_char(FieldCharType::Begin, true),
+                    Run::new().add_instr_text(instr),
+                    Run::new().add_field_char(FieldCharType::Separate, false),
+                    Run::new().add_text(shown),
+                    Run::new().add_field_char(FieldCharType::End, false),
+                ];
+                for part in parts {
+                    let part = self.run_props(part, s, id);
+                    p = p.add_run(part);
+                }
                 continue;
             }
             for (i, line) in r.text.split('\n').enumerate() {
