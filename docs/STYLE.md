@@ -212,12 +212,55 @@ Word 的列表定义在 numbering.xml：`w:abstractNum` 下每一级一个 `w:lv
 | `size` | `A4` `Letter` …，或 `{ width, height }` | w:pgSz | p:sldSz | pageSetup paperSize | @page size | page width / height |
 | `landscape` | 布尔 | w:pgSz orient | — | orientation | @page | flipped |
 | `margin` / `marginTop` … | 长度 | w:pgMar | — | pageMargins | @page margin | margin |
-| `headerDistance` / `footerDistance` | 长度 | w:pgMar header / footer | — | pageMargins header / footer | — | header-ascent |
+| `headerDistance` / `footerDistance` | 长度，默认 0.5in | w:pgMar header / footer | — | pageMargins header / footer | 页眉页脚框离纸边的距离（`--paged`） | 页眉页脚框的内边距 |
 | `gutter` | 长度 | w:pgMar gutter | — | — | — | binding |
 | `columns` | 数字，或 `{ count, gap }` | w:cols | — | — | columns | columns |
 | `verticalAlign` | `top` `center` | w:vAlign | — | — | — | — |
 
-页眉页脚、页码要单独设计，先不放进这一版。
+`meta.page` 是第一节的设置。另外三个字段管页眉页脚和页码：
+
+| 字段 | 值 | Word | HTML（`--paged`） | PDF |
+|---|---|---|---|---|
+| `header` / `footer` | 元素 id，或 `{ default, first, even }` | w:headerReference / w:footerReference | `<template>`，排完版由脚本放进页边距 | page header / footer |
+| `pageNumberStart` | 数字 | w:pgNumType start | 脚本数页码时从这里重新数 | 自己数页码 |
+
+### 分节
+
+`Section` 是容器组件，只能直接放在 root 下面。每一节从新的一页开始，可以改纸张、方向、页边距、分栏、页眉页脚，也可以让页码重新开始。`Section` 的 props 就是上表的这些字段，都可以不写，不写的沿用上一节，跟 Word 的「链接到前一节」一样。
+
+root 下面不写 `Section` 也行，整份文档就是一节，用 `meta.page` 的设置。也可以开头一段不放进 `Section`，算作第一节，后面全用 `Section`；但 `Section` 后面不能再跟不在 `Section` 里的内容。
+
+```json
+"elements": {
+  "doc":   { "type": "Document", "children": ["cover", "body"] },
+  "cover": { "type": "Section", "props": { "header": { "first": null } }, "children": ["title"] },
+  "body":  {
+    "type": "Section",
+    "props": { "pageNumberStart": 1, "header": { "default": "hdr-odd", "even": "hdr-even" } },
+    "children": ["ch1", "p1"]
+  },
+  "foot":  { "type": "Text", "props": { "text": ["第 ", { "field": "page" }, " 页，共 ", { "field": "pages" }, " 页"] } }
+}
+```
+
+### 页眉页脚
+
+- 写一个元素 id，等于只改 `default`（普通页用的那个）。
+- 写对象时分开设：`default` 普通页，`first` 本节第一页，`even` 偶数页。写 `null` 表示这一种留空，不写表示沿用上一节。
+- 只要设了 `first`（包括 `null`），本节首页就单独处理（Word 的「首页不同」）；页眉和页脚共用这个开关，只给页眉设了 `first` 时，首页的页脚用 `default`。
+- 任何一节设了 `even`，整份文档就开「奇偶页不同」（Word 里这是整个文档的开关），没设 `even` 的节偶数页用 `default`。
+- `"header": null` 写在 `Section` 上，表示清掉从上一节接过来的全部页眉。
+- 页眉页脚里的元素跟正文一样写在 `elements` 里，但不能同时出现在正文里，也不能放 PageBreak、Section、Slide。样式继承根元素（Document）的样式。
+
+### 页码
+
+runs 里写 `{ "field": "page" }` 是当前页码，`"pages"` 是全文总页数，`"sectionPages"` 是本节页数。可以带文字样式；`text` 可以不写，写了就是 Word 打开时更新前显示的值。页码按 Word 的规则数：每节接着上一节往下数，节上写了 `pageNumberStart` 就从那个数重新开始；奇偶页按页码数，不按物理页数。
+
+各格式的差别：
+
+- docx：写成 Word 的域（PAGE、NUMPAGES、SECTIONPAGES），Word 打开后自己算。LibreOffice 不认 SECTIONPAGES，只显示 `text` 的值。
+- pdf：Typst 排完版后按上面的规则算好。
+- html：直接打开或打印时没有页眉页脚，页码显示 `text` 的值；加 `--paged` 后由脚本排完版再放页眉页脚、填页码。屏幕上每节按自己的纸张显示，但打印时 Paged.js 只用第一节的纸张，横竖混排的文档打出来横向那几页会被裁掉，要打印请用 pdf。
 
 ## 十一、样式集和继承
 

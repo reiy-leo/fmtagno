@@ -45,7 +45,7 @@ const SETS: &str = r##"{
 #[test]
 fn style_sets_cascade() {
     let (_, tree) = fmtagno::prepare(SETS, &Env::default()).unwrap();
-    let h = &tree.children[0].style;
+    let h = &tree.children[0].children[0].style;
     // extends：formal 的 fontSize 22，modern 的颜色，顶层 styles 的居中
     assert_eq!(h.size_pt(), 22.0);
     assert_eq!(h.color.as_ref().unwrap().rgb(), "1A73E8");
@@ -54,7 +54,7 @@ fn style_sets_cascade() {
     assert_eq!(f.latin.as_deref(), Some("Inter"));
     assert_eq!(f.east_asia.as_deref(), Some("宋体"));
     // 命名样式先找样式集里的
-    let t = &tree.children[1].style;
+    let t = &tree.children[0].children[1].style;
     assert_eq!(t.color.as_ref().unwrap().rgb(), "888888");
     assert_eq!(t.size_pt(), 12.0);
 }
@@ -67,7 +67,7 @@ fn command_line_style_set_wins() {
     };
     let (_, tree) = fmtagno::prepare(SETS, &env).unwrap();
     assert_eq!(
-        tree.children[0].style.color.as_ref().unwrap().rgb(),
+        tree.children[0].children[0].style.color.as_ref().unwrap().rgb(),
         "111111"
     );
 }
@@ -218,7 +218,7 @@ fn custom_component_parts_and_overrides() {
       }
     }"##;
     let (_, tree) = fmtagno::prepare(json, &Env::default()).unwrap();
-    let t = &tree.children[0];
+    let t = &tree.children[0].children[0];
     // 模板样式盖住通用的 Table 样式（12 → 9），PriceTable:t.header 再盖住模板的 parts
     assert_eq!(t.style.size_pt(), 9.0);
     assert_eq!(t.part("header").background.unwrap().solid().rgb(), "333333");
