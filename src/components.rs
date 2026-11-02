@@ -12,11 +12,28 @@ pub enum RunKind {
     InlineCode,
 }
 
+/// 域：渲染时才知道的值，Word 里是 PAGE、NUMPAGES、SECTIONPAGES。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Field {
+    /// 当前页码
+    Page,
+    /// 全文总页数
+    Pages,
+    /// 本节页数
+    SectionPages,
+}
+
 /// 一段文字里的一小段，可以单独设文字样式或加链接。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Run {
+    /// 写了 field 时可以不写
+    #[serde(default)]
     pub text: String,
+    /// 页码这类域，写了就不用 text
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<Field>,
     /// 写 "InlineCode" 表示行内代码，外观由 InlineCode 组件样式决定
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<RunKind>,
@@ -45,6 +62,7 @@ impl Run {
     pub fn plain(text: &str) -> Run {
         Run {
             text: text.to_string(),
+            field: None,
             kind: None,
             href: None,
             bold: None,
@@ -296,6 +314,63 @@ pub struct SlideProps {
     pub title: Option<String>,
 }
 
+/// 一节：可以换纸张、页边距、分栏、页眉页脚，重排页码。没写的字段沿用上一节。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SectionProps {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<crate::doc::PageSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landscape: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_top: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_right: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_bottom: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub margin_left: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gutter: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns: Option<crate::doc::Columns>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_distance: Option<crate::style::Len>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footer_distance: Option<crate::style::Len>,
+    /// 页眉：元素 id，或 { default, first, even }；写 null 清掉，不写沿用上一节
+    #[serde(
+        default,
+        deserialize_with = "crate::doc::patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<crate::doc::HfDef>")]
+    pub header: Option<Option<crate::doc::HfDef>>,
+    #[serde(
+        default,
+        deserialize_with = "crate::doc::patch",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(with = "Option<crate::doc::HfDef>")]
+    pub footer: Option<Option<crate::doc::HfDef>>,
+    /// 本节页码从几重新开始
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_number_start: Option<u32>,
+    /// 算好的版面，建树时填
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub layout: Option<Box<crate::doc::SectionLayout>>,
+}
+
+impl SectionProps {
+    /// 建好树以后一定有。
+    pub fn layout(&self) -> &crate::doc::SectionLayout {
+        self.layout.as_deref().expect("Section 的版面没算")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Component {
     Document(DocumentProps),
@@ -307,9 +382,25 @@ pub enum Component {
     Image(ImageProps),
     PageBreak(PageBreakProps),
     Slide(SlideProps),
+    Section(SectionProps),
 }
 
 impl Component {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Component::Document(_) => "Document",
+            Component::Heading(_) => "Heading",
+            Component::Text(_) => "Text",
+            Component::Code(_) => "Code",
+            Component::List(_) => "List",
+            Component::Table(_) => "Table",
+            Component::Image(_) => "Image",
+            Component::PageBreak(_) => "PageBreak",
+            Component::Slide(_) => "Slide",
+            Component::Section(_) => "Section",
+        }
+    }
+
     /// 组件里所有文字类 props，按出现顺序。
     pub fn inlines_mut(&mut self) -> Vec<&mut Inline> {
         fn list<'a>(items: &'a mut [ListItem], out: &mut Vec<&'a mut Inline>) {
@@ -431,6 +522,13 @@ pub const BUILTINS: &[Spec] = &[
         schema: || schema_for!(PageBreakProps),
     },
     Spec {
+        name: "Section",
+        description: "一节，只能直接放在 root 下面：可以换纸张、方向、页边距、分栏、页眉页脚，页码可以重新开始；没写的沿用上一节",
+        container: true,
+        parts: &[],
+        schema: || schema_for!(SectionProps),
+    },
+    Spec {
         name: "Slide",
         description: "一页幻灯片（16:9），子元素排在里面",
         container: true,
@@ -468,6 +566,7 @@ pub fn parse(kind: &str, props: &serde_json::Value) -> anyhow::Result<Component>
         "Image" => Component::Image(serde_json::from_value(p)?),
         "PageBreak" => Component::PageBreak(serde_json::from_value(p)?),
         "Slide" => Component::Slide(serde_json::from_value(p)?),
+        "Section" => Component::Section(serde_json::from_value(p)?),
         "InlineCode" => anyhow::bail!("InlineCode 只能写在文字的 runs 里，不能单独当元素"),
         other => anyhow::bail!("组件 `{other}` 没注册"),
     };

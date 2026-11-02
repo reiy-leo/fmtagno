@@ -6,8 +6,8 @@ use base64::Engine;
 
 use crate::{
     assets,
-    components::{CodeProps, Component, ImageProps, Inline, ListProps, Run, TableProps},
-    doc::{Doc, Node},
+    components::{CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableProps},
+    doc::{Doc, Node, SectionLayout},
     render::{
         Options, Output,
         common::{self, Grid, Warn},
@@ -26,6 +26,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         out: String::new(),
         warn: Warn::default(),
         opts,
+        sec_css: String::new(),
     };
     let lang = doc.meta.lang.as_deref().unwrap_or("zh-CN");
     let title = doc.meta.title.as_deref().unwrap_or("fmtagno");
@@ -48,18 +49,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
     if let Some(a) = &doc.meta.author {
         let _ = writeln!(r.out, "<meta name=\"author\" content=\"{}\">", esc(a));
     }
-    let cols = page
-        .columns
-        .as_ref()
-        .filter(|c| c.count() > 1)
-        .map(|c| {
-            format!(
-                "main.fmtagno-root {{ column-count: {}; column-gap: {}pt; }}\n",
-                c.count(),
-                c.gap_pt()
-            )
-        })
-        .unwrap_or_default();
+    let cols = "/*fmtagno-sections*/\n";
     let _ = write!(
         r.out,
         "<title>{}</title>\n<style>\n@page {{ size: {w}pt {h}pt; margin: {mt}pt {mr}pt {mb}pt {}pt; }}\n\
@@ -78,9 +68,12 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         r.out.push_str(PAGED_JS);
         r.out.push_str("\n</script>\n<script>\n");
         r.out.push_str(PAGED_REPEAT_THEAD);
+        r.out.push_str("\n");
+        r.out.push_str(PAGED_HF);
         r.out.push_str("\n</script>\n");
     }
     r.out.push_str("</body>\n</html>\n");
+    r.out = r.out.replacen("/*fmtagno-sections*/\n", &r.sec_css, 1);
     Output {
         bytes: r.out.into_bytes(),
         warnings: r.warn.list,
@@ -99,9 +92,11 @@ code { font: inherit; }
 .fmtagno-marker { display: inline-block; white-space: nowrap; }
 .fmtagno-ln { display: inline-block; min-width: 2.5em; color: #999; user-select: none; }
 .fmtagno-pagebreak { break-after: page; }
+.fmtagno-section + .fmtagno-section { break-before: page; }
 .fmtagno-slide { aspect-ratio: 16 / 9; border: 1px solid #ddd; border-radius: 6px; padding: 2rem 3rem; \
 margin: 1.5rem 0; overflow: hidden; break-inside: avoid; break-after: page; position: relative; }
-@media screen { .fmtagno-pagebreak { border-top: 1px dashed #bbb; margin: 2rem 0; } }
+@media screen { .fmtagno-pagebreak { border-top: 1px dashed #bbb; margin: 2rem 0; } \
+.fmtagno-section + .fmtagno-section { border-top: 1px dashed #bbb; margin-top: 2rem; padding-top: 2rem; } }
 @media print { body { max-width: none; margin: 0; padding: 0; } .fmtagno-slide { border: none; } }
 ";
 
@@ -134,7 +129,10 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; padding: 24px 0; }
   .pagedjs_page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); margin-bottom: 24px; }
   .fmtagno-pagebreak { border-top: none; margin: 0; }
+  .fmtagno-section + .fmtagno-section { border-top: none; margin-top: 0; padding-top: 0; }
 }
+.pagedjs_pagebox { position: relative; }
+.fmtagno-hf-box { position: absolute; }
 @media print { body { background: none; } }
 </style>
 <style>
@@ -143,10 +141,68 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
 </style>
 ";
 
+/// 页眉页脚和页码：Paged.js 排完所有页后，按每页属于哪节、是不是本节首页、页码奇偶，
+/// 把对应的 <template> 内容放进页面的边距里，再填好页码域。
+/// 页码按 Word 的规则自己数：每节接着上一节数，写了 data-page-start 就从那个数重新开始。
+const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
+  beforeParsed(content) {
+    this.tpls = {};
+    for (const t of content.querySelectorAll('template.fmtagno-hf')) {
+      this.tpls[t.dataset.section + ':' + t.dataset.kind] = t.content;
+      t.remove();
+    }
+  }
+  afterRendered(pages) {
+    const info = [];
+    let cur = null;
+    pages.forEach((p, i) => {
+      const s = p.element.querySelector('.fmtagno-section[data-section]');
+      const id = s ? s.dataset.section : (cur ? cur.id : '0');
+      let first = false;
+      if (!cur || id !== cur.id) {
+        const start = s && s.dataset.pageStart ? +s.dataset.pageStart
+          : (cur ? cur.num + (i - cur.page) : 1);
+        cur = { id, page: i, num: start, el: s, count: 0 };
+        first = true;
+      }
+      cur.count++;
+      info.push({ p, sec: cur, first, num: cur.num + (i - cur.page) });
+    });
+    const fill = (root, x) => {
+      for (const f of root.querySelectorAll('.fmtagno-field')) {
+        const k = f.dataset.field;
+        f.textContent = k === 'page' ? x.num : k === 'pages' ? pages.length : x.sec.count;
+      }
+    };
+    for (const x of info) {
+      const s = x.sec.el;
+      if (s) {
+        const [hd, fd, left, width] = s.dataset.hf.split(' ');
+        const kind = x.first && 'titlePage' in s.dataset ? 'first'
+          : 'evenOdd' in s.dataset && x.num % 2 === 0 ? 'even' : 'default';
+        const box = x.p.element.querySelector('.pagedjs_pagebox');
+        for (const [part, pos, d] of [['header', 'top', hd], ['footer', 'bottom', fd]]) {
+          const t = this.tpls[x.sec.id + ':' + part + '-' + kind];
+          if (!t || !box) continue;
+          const div = document.createElement('div');
+          div.className = 'fmtagno-hf-box fmtagno-' + part;
+          div.style.cssText = `${pos}:${d}pt;left:${left}pt;width:${width}pt`;
+          div.appendChild(t.cloneNode(true));
+          box.appendChild(div);
+        }
+      }
+      fill(x.p.element, x);
+    }
+  }
+}
+Paged.registerHandlers(FmtagnoHeaders);"#;
+
 struct Html<'a> {
     out: String,
     warn: Warn,
     opts: &'a Options,
+    /// 各节的 @page 和分栏规则，最后填进 <style>
+    sec_css: String,
 }
 
 impl Html<'_> {
@@ -218,7 +274,77 @@ impl Html<'_> {
                     "<div class=\"fmtagno-pagebreak\" id=\"{id}\"></div>"
                 );
             }
+            Component::Section(p) => self.section(n, p.layout(), parent, &st),
         }
+    }
+
+    /// 一节：每节一个具名页面（@page fmtagno-sN），页眉页脚写成 <template>，
+    /// 只在 --paged 时由脚本放进页边距；直接打开或打印时不显示。
+    fn section(&mut self, n: &Node, lay: &SectionLayout, parent: Option<&Style>, st: &str) {
+        let page = &lay.page;
+        let mut ws = Vec::new();
+        let (w, h) = page.dims_pt(&mut ws);
+        for x in ws {
+            self.warn.push(x);
+        }
+        let [mt, mr, mb, ml] = page.margins_pt();
+        let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
+        let (hd, fd) = page.hf_distance_pt();
+        let i = lay.index;
+        let _ = writeln!(
+            self.sec_css,
+            "@page fmtagno-s{i} {{ size: {w}pt {h}pt; margin: {mt}pt {mr}pt {mb}pt {}pt; }}",
+            ml + gutter
+        );
+        let cols = page
+            .columns
+            .as_ref()
+            .filter(|c| c.count() > 1)
+            .map(|c| format!(" column-count: {}; column-gap: {}pt;", c.count(), c.gap_pt()))
+            .unwrap_or_default();
+        let _ = writeln!(
+            self.sec_css,
+            ".fmtagno-section[data-section=\"{i}\"] {{ page: fmtagno-s{i};{cols} }}"
+        );
+        let mut attrs = format!(
+            " data-section=\"{i}\" data-hf=\"{hd} {fd} {} {}\"",
+            ml + gutter,
+            w - ml - mr - gutter
+        );
+        if let Some(x) = lay.page_number_start {
+            let _ = write!(attrs, " data-page-start=\"{x}\"");
+        }
+        if lay.title_page {
+            attrs.push_str(" data-title-page");
+        }
+        if lay.even_odd {
+            attrs.push_str(" data-even-odd");
+        }
+        let _ = writeln!(
+            self.out,
+            "<section class=\"fmtagno-section\" id=\"{}\"{attrs}{st}>",
+            esc(&n.id)
+        );
+        for (part, set) in [("header", &lay.header), ("footer", &lay.footer)] {
+            let kinds = [
+                ("default", set.default.as_ref(), true),
+                ("first", set.for_first(), lay.title_page),
+                ("even", set.for_even(), lay.even_odd),
+            ];
+            for (kind, node, on) in kinds {
+                let Some(node) = node.filter(|_| on) else {
+                    continue;
+                };
+                let _ = writeln!(
+                    self.out,
+                    "<template class=\"fmtagno-hf\" data-section=\"{i}\" data-kind=\"{part}-{kind}\">"
+                );
+                self.node(node, parent);
+                self.out.push_str("</template>\n");
+            }
+        }
+        self.children(n);
+        self.out.push_str("</section>\n");
     }
 
     fn children(&mut self, n: &Node) {
@@ -592,7 +718,15 @@ impl Html<'_> {
         {
             let _ = write!(css, "background-color:{};", h.css());
         }
-        let text = esc(&r.text).replace('\n', "<br>");
+        let mut text = esc(&r.text).replace('\n', "<br>");
+        if let Some(f) = r.field {
+            let k = match f {
+                Field::Page => "page",
+                Field::Pages => "pages",
+                Field::SectionPages => "sectionPages",
+            };
+            text = format!("<span class=\"fmtagno-field\" data-field=\"{k}\">{text}</span>");
+        }
         let (open, close) = if r.is_code() {
             ("<code", "</code>")
         } else {
