@@ -1028,7 +1028,7 @@ impl Markup<'_> {
                 };
                 let _ = writeln!(
                     self.out,
-                    "#place({al}, dx: {x}pt, dy: {y}pt, scope: \"parent\", float: false)[{fig}]"
+                    "#place({al}, dx: {x}pt, dy: {y}pt)[{fig}]"
                 );
             }
         }

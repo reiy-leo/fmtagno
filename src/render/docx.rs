@@ -185,6 +185,10 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
     let mut xml = docx.build();
     xml.document = mark_table_headers(&xml.document, &r.repeat_heads);
     xml.document = fix_sections(&xml.document, &cols);
+    xml.document = mark_behind(&xml.document);
+    for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
+        *h = mark_behind(h);
+    }
     let mut buf = std::io::Cursor::new(Vec::new());
     xml.pack(&mut buf)?;
     Ok(Output {
@@ -347,6 +351,33 @@ fn elements(body: &str) -> Vec<String> {
 
 /// 给要重复的表头行补上 `<w:tblHeader />`：Word 跨页时会在新页顶上再画一遍这一行。
 /// `heads` 和文档里 `<w:tbl>` 出现的顺序一一对应（表格不嵌套）。
+/// 衬于文字下方的图片在 relativeHeight 上的记号，见 `mark_behind`。
+const BEHIND_MARK: u32 = 190_499;
+
+/// 把带记号的浮动图片改成衬于文字下方（behindDoc="1"）。
+fn mark_behind(xml: &[u8]) -> Vec<u8> {
+    let s = String::from_utf8_lossy(xml);
+    let mark = format!("relativeHeight=\"{BEHIND_MARK}\"");
+    if !s.contains(&mark) {
+        return xml.to_vec();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest: &str = &s;
+    while let Some(i) = rest.find("<wp:anchor ") {
+        let end = rest[i..].find('>').map(|e| i + e).unwrap_or(rest.len());
+        let tag = &rest[i..end];
+        out.push_str(&rest[..i]);
+        if tag.contains(&mark) {
+            out.push_str(&tag.replace("behindDoc=\"0\"", "behindDoc=\"1\""));
+        } else {
+            out.push_str(tag);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out.into_bytes()
+}
+
 fn mark_table_headers(doc: &[u8], heads: &[bool]) -> Vec<u8> {
     if !heads.contains(&true) {
         return doc.to_vec();
@@ -848,7 +879,8 @@ impl Ctx<'_> {
             (None, Some(h)) => (h * pw / ph, h),
             (None, None) => (pw, ph),
         };
-        if w > self.content_width_pt {
+        // 绝对定位的图片（比如整页背景）可以比版心宽，不缩
+        if w > self.content_width_pt && s.position != Some(Position::Absolute) {
             h *= self.content_width_pt / w;
             w = self.content_width_pt;
         }
@@ -912,8 +944,13 @@ impl Ctx<'_> {
             }
         }
         if matches!(s.wrap, Some(Wrap::Image(WrapMode::Behind))) {
-            self.warn
-                .unsupported(FORMAT, "wrap: behind（按 inFront 处理）", &n.id);
+            if s.position.unwrap_or(Position::Inline) == Position::Inline {
+                self.warn
+                    .unsupported(FORMAT, "wrap: behind（只对浮动、绝对定位的图片有效）", &n.id);
+            } else {
+                // docx-rs 把 behindDoc 写死成 0：用 relativeHeight 做记号，生成 XML 后再改
+                pic = pic.relative_height(BEHIND_MARK);
+            }
         }
         for (f, on) in [
             ("opacity", s.opacity.is_some()),
