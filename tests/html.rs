@@ -120,6 +120,9 @@ fn auto_columns_shrink_to_content() {
     let html = String::from_utf8(out.bytes).unwrap();
     assert!(!html.contains("width:100%"), "{html}");
     assert!(html.contains("table-layout:auto"), "{html}");
-    assert!(html.contains(r#"<col style="width:5.65pt"><col>"#), "{html}");
+    assert!(
+        html.contains(r#"<col style="width:5.65pt"><col>"#),
+        "{html}"
+    );
     assert!(html.contains("padding:4pt;padding-left:12pt;"), "{html}");
 }

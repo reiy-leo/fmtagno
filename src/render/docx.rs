@@ -25,8 +25,8 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Border, BorderStyle, Caps, ColWidth, Edge, HAlign, Len, LineHeight,
-        ListStyleType, MarkerGap, Position, Side, Strike, Style as PStyle, TableLayout,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, ColWidth, Edge, HAlign, Len,
+        LineHeight, ListStyleType, MarkerGap, Position, Side, Strike, Style as PStyle, TableLayout,
         UnderlineStyle, VerticalAlign, Wrap, WrapMode,
     },
     units,

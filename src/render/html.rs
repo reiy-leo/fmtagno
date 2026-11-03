@@ -13,8 +13,8 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Caps, ColWidth, Edge, EmphasisMark, Len, LineHeight, MarkerGap,
-        Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap, WrapMode,
+        Align, AnchorTo, Background, Caps, ColWidth, Edge, EmphasisMark, Len, LineHeight,
+        MarkerGap, Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap, WrapMode,
     },
 };
 
@@ -491,10 +491,10 @@ impl Html<'_> {
             css.push_str("width:100%;");
         }
         // 有 auto 列时用自动布局，浏览器才会按内容撑开
-        let layout = s
-            .table_layout
-            .map(|l| l.as_str())
-            .unwrap_or(if has_auto { "auto" } else { "fixed" });
+        let layout =
+            s.table_layout
+                .map(|l| l.as_str())
+                .unwrap_or(if has_auto { "auto" } else { "fixed" });
         let _ = write!(css, "table-layout:{layout};");
         let _ = writeln!(
             self.out,

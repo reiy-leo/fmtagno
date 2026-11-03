@@ -26,7 +26,7 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Border, BorderStyle, Caps, Color, ColWidth, Edge, HAlign, Len,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, ColWidth, Color, Edge, HAlign, Len,
         LineHeight, MarkerGap, Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap,
         WrapMode,
     },

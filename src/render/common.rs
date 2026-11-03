@@ -201,7 +201,9 @@ pub fn col_widths(p: &TableProps, g: &Grid, warn: &mut Warn, id: &str) -> Vec<Co
     match &p.widths {
         Some(ws) if ws.len() == g.cols => ws.clone(),
         Some(_) => {
-            warn.push(format!("表格 `{id}` 的 widths 个数和列数对不上，改成平均分"));
+            warn.push(format!(
+                "表格 `{id}` 的 widths 个数和列数对不上，改成平均分"
+            ));
             vec![ColWidth::Ratio(1.0); g.cols]
         }
         None => vec![ColWidth::Ratio(1.0); g.cols],

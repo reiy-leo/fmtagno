@@ -102,10 +102,17 @@ fn auto_columns_and_part_padding() {
         }
       }
     }"##;
-    let json = json.replace(r#""firstColumn": true }"#, r#""firstColumn": true, "lastColumn": true }"#);
+    let json = json.replace(
+        r#""firstColumn": true }"#,
+        r#""firstColumn": true, "lastColumn": true }"#,
+    );
     let out = fmtagno::render_str(&json, Format::Docx, None).unwrap();
     let b = &out.bytes;
-    assert!(has(b, r#"<w:gridCol w:w="113" />"#) || has(b, r#"<w:gridCol w:w="113"/>"#));
+    // 1420 = 4 个全角字 × 10pt + 左右 padding 12 + 18 + 1pt 余量
+    assert!(has(
+        b,
+        r#"<w:gridCol w:w="113" w:type="dxa" /><w:gridCol w:w="1420""#
+    ));
     assert!(has(b, r#"<w:tcW w:w="0" w:type="auto""#));
     assert!(has(b, r#"<w:tblLayout w:type="autofit""#));
     assert!(has(b, r#"<w:left w:w="240" w:type="dxa""#));
