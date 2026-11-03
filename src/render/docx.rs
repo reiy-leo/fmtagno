@@ -945,8 +945,11 @@ impl Ctx<'_> {
         }
         if matches!(s.wrap, Some(Wrap::Image(WrapMode::Behind))) {
             if s.position.unwrap_or(Position::Inline) == Position::Inline {
-                self.warn
-                    .unsupported(FORMAT, "wrap: behind（只对浮动、绝对定位的图片有效）", &n.id);
+                self.warn.unsupported(
+                    FORMAT,
+                    "wrap: behind（只对浮动、绝对定位的图片有效）",
+                    &n.id,
+                );
             } else {
                 // docx-rs 把 behindDoc 写死成 0：用 relativeHeight 做记号，生成 XML 后再改
                 pic = pic.relative_height(BEHIND_MARK);

@@ -1026,10 +1026,7 @@ impl Markup<'_> {
                     (_, Some(VerticalAlign::Bottom)) => "bottom + left".into(),
                     _ => "top + left".into(),
                 };
-                let _ = writeln!(
-                    self.out,
-                    "#place({al}, dx: {x}pt, dy: {y}pt)[{fig}]"
-                );
+                let _ = writeln!(self.out, "#place({al}, dx: {x}pt, dy: {y}pt)[{fig}]");
             }
         }
     }
