@@ -19,8 +19,8 @@ use typst_layout::PagedDocument;
 
 use crate::{
     assets,
-    components::{CodeProps, Component, ImageProps, Inline, ListProps, Run, TableProps},
-    doc::{Doc, Node},
+    components::{CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableProps},
+    doc::{Doc, HfNodes, Node, SectionLayout},
     render::{
         Options, Output,
         common::{self, Grid, Warn},
@@ -116,6 +116,29 @@ fn fallback_fonts(source: &str) -> Vec<String> {
 pub type Files = Vec<(String, Vec<u8>)>;
 
 /// 生成 Typst 源码。返回源码、图片文件、警告。
+/// 页码函数，见 preamble。
+const FIELDS_FN: &str = r#"#let fmtagno-info() = {
+  let p = here().page()
+  let num = 1
+  let prev = none
+  let next = none
+  for m in query(<fmtagno-sec>) {
+    let sp = m.location().page()
+    if sp > p { next = sp; break }
+    if m.value != none { num = m.value } else if prev != none { num = num + sp - prev }
+    prev = sp
+  }
+  if prev == none { prev = 1 }
+  let end = locate(<fmtagno-end>).page()
+  (
+    page: num + p - prev,
+    first: prev == p,
+    total: end,
+    section-pages: (if next == none { end + 1 } else { next }) - prev,
+  )
+}
+"#;
+
 pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<String>) {
     let mut m = Markup {
         out: String::new(),
@@ -127,6 +150,7 @@ pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<Str
     m.preamble(doc);
     let base = Style::default();
     m.node(tree, &base);
+    m.out.push_str("#metadata(none) <fmtagno-end>\n");
     (m.out, m.files, m.warn.list)
 }
 
@@ -141,28 +165,11 @@ struct Markup<'a> {
 
 impl Markup<'_> {
     fn preamble(&mut self, doc: &Doc) {
-        let page = &doc.meta.page;
-        let mut ws = Vec::new();
-        let (w, h) = page.dims_pt(&mut ws);
-        for x in ws {
-            self.warn.push(x);
-        }
-        let [mt, mr, mb, ml] = page.margins_pt();
-        let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
-        self.margins = [mt, mr, mb, ml + gutter];
-        let cols = match &page.columns {
-            Some(c) if c.count() > 1 => format!(", columns: {}", c.count()),
-            _ => String::new(),
-        };
         let o = &mut self.out;
-        let _ = writeln!(
-            o,
-            "#set page(width: {w}pt, height: {h}pt, margin: (top: {mt}pt, right: {mr}pt, bottom: {mb}pt, left: {}pt){cols})",
-            ml + gutter
-        );
-        if let Some(c) = page.columns.as_ref().filter(|c| c.count() > 1) {
-            let _ = writeln!(o, "#set columns(gutter: {}pt)", c.gap_pt());
-        }
+        // 页码这类域都靠它算：每节开头放一个 <fmtagno-sec> 标记（值是重新开始的页码或 none），
+        // 文末放 <fmtagno-end>。页码自己数，不用 counter(page)，这样首页判断、重排页码和
+        // Word 的规则一致。
+        o.push_str(FIELDS_FN);
         let mut docset = Vec::new();
         if let Some(t) = &doc.meta.title {
             docset.push(format!("title: {}", lit(t)));
@@ -241,7 +248,86 @@ impl Markup<'_> {
             Component::Table(p) => self.table(n, p, parent),
             Component::Image(p) => self.image(n, p, parent),
             Component::PageBreak(_) => self.out.push_str("#pagebreak()\n"),
+            Component::Section(p) => self.section(n, p.layout(), parent),
         }
+    }
+
+    /// 一节：换页面设置（typst 会从新的一页开始），放节标记，再排内容。
+    fn section(&mut self, n: &Node, lay: &SectionLayout, parent: &Style) {
+        let page = &lay.page;
+        let mut ws = Vec::new();
+        let (w, h) = page.dims_pt(&mut ws);
+        for x in ws {
+            self.warn.push(x);
+        }
+        let [mt, mr, mb, ml] = page.margins_pt();
+        let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
+        self.margins = [mt, mr, mb, ml + gutter];
+        let cols = page.columns.as_ref().map_or(1, |c| c.count());
+        let (hd, fd) = page.hf_distance_pt();
+        let header = self.hf_src(&lay.header, lay, parent, true, hd);
+        let footer = self.hf_src(&lay.footer, lay, parent, false, fd);
+        let mut o = String::new();
+        if lay.index > 0 {
+            o.push_str("#pagebreak(weak: true)\n");
+        }
+        let _ = writeln!(
+            o,
+            "#set page(width: {w}pt, height: {h}pt, margin: (top: {mt}pt, right: {mr}pt, bottom: {mb}pt, left: {}pt), columns: {cols}, header: {header}, footer: {footer}, header-ascent: 0pt, footer-descent: 0pt)",
+            ml + gutter
+        );
+        if let Some(c) = page.columns.as_ref().filter(|c| c.count() > 1) {
+            let _ = writeln!(o, "#set columns(gutter: {}pt)", c.gap_pt());
+        }
+        let start = lay
+            .page_number_start
+            .map_or("none".to_string(), |x| x.to_string());
+        let _ = writeln!(o, "#metadata({start}) <fmtagno-sec>");
+        self.out.push_str(&o);
+        let body = self.children_src(n);
+        let src = self.scope_src(body, &n.style, parent, &n.id);
+        self.out.push_str(&src);
+    }
+
+    /// 页眉或页脚的 typst 表达式：按本节首页、偶数页、其他页挑内容。
+    /// 页眉顶端离纸边 `dist`，页脚底端离纸边 `dist`，跟 Word 一样。
+    fn hf_src(
+        &mut self,
+        set: &HfNodes,
+        lay: &SectionLayout,
+        parent: &Style,
+        top: bool,
+        dist: f32,
+    ) -> String {
+        if set.is_empty() {
+            return "none".into();
+        }
+        let one = |m: &mut Self, n: Option<&Node>| -> String {
+            let Some(n) = n else {
+                return "none".into();
+            };
+            let saved = std::mem::take(&mut m.out);
+            m.node(n, parent);
+            let body = std::mem::replace(&mut m.out, saved);
+            let (inset, align) = if top {
+                (format!("(top: {dist}pt)"), "top")
+            } else {
+                (format!("(bottom: {dist}pt)"), "bottom")
+            };
+            format!("block(width: 100%, height: 100%, inset: {inset}, align({align}, [\n{body}]))")
+        };
+        let default = one(self, set.default.as_ref());
+        let mut src = String::from("context { let i = fmtagno-info(); ");
+        if lay.title_page {
+            let f = one(self, set.for_first());
+            let _ = write!(src, "if i.first {{ {f} }} else ");
+        }
+        if lay.even_odd {
+            let e = one(self, set.for_even());
+            let _ = write!(src, "if calc.even(i.page) {{ {e} }} else ");
+        }
+        let _ = write!(src, "{{ {default} }} }}");
+        src
     }
 
     fn children_src(&mut self, n: &Node) -> String {
@@ -523,7 +609,15 @@ impl Markup<'_> {
             return String::new();
         }
         let mut piece = String::new();
-        for (i, line) in r.text.split('\n').enumerate() {
+        if let Some(f) = r.field {
+            let key = match f {
+                Field::Page => "page",
+                Field::Pages => "total",
+                Field::SectionPages => "section-pages",
+            };
+            let _ = write!(piece, "#context str(fmtagno-info().{key})");
+        }
+        for (i, line) in r.text.split('\n').enumerate().filter(|_| r.field.is_none()) {
             if i > 0 {
                 piece.push_str("#linebreak()");
             }

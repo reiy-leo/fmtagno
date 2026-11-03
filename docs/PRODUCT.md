@@ -12,7 +12,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版�
 ## 第一版（v0.1）
 
 - 格式：docx、pdf、html。
-- 内置组件：Heading、Text、Code、List、Table、Image、PageBreak、Slide，外加根组件 Document；行内有 InlineCode（写在 runs 里）。
+- 内置组件：Heading、Text、Code、List、Table、Image、PageBreak、Slide、Section（分节），外加根组件 Document；行内有 InlineCode（写在 runs 里）。
 - 命令行：
   - `fmtagno render doc.json -o out.docx`：按输出文件的扩展名选格式。
   - `fmtagno check doc.json`：只校验，不出文件。
@@ -56,15 +56,15 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版�
 - `props`：组件自己的参数，多写、少写、写错类型都会报错。
 - `style`：三种写法都行：样式名 `"muted"`；样式名数组 `["muted", "center"]`，后面的覆盖前面的；样式对象 `{ "fontSize": 11 }`。数组里也能混写对象。
 - `parts`：部位样式，比如表格的 `header`、`evenRow`、`lastRow`，列表的 `level2`、`marker`。
-- `children`：子元素 id 列表，只有容器组件（Document、Slide）能用。每个元素只能被引用一次。
+- `children`：子元素 id 列表，只有容器组件（Document、Slide、Section）能用。每个元素只能被引用一次。
 
 文字类的 props（Heading 的 `text`、Text 的 `text`、List 的每一项、表格的每一格）都能写成纯字符串，也能写成 runs 数组。数组里可以直接写字符串，也可以写对象：`bold`、`italic`、`underline`、`color`、`href` 是简写，`style` 能写全部文字样式；`"type": "InlineCode"` 表示行内代码。列表项可以写成 `{ "text": …, "items": [...] }` 带子列表。
 
-`meta.page` 管纸张：`size`（默认 A4，也可以写 `{ "width", "height" }`）、`landscape`、`margin` 和四个单边、`gutter`、`columns`。
+`meta.page` 管纸张：`size`（默认 A4，也可以写 `{ "width", "height" }`）、`landscape`、`margin` 和四个单边、`gutter`、`columns`，还有页眉页脚 `header`、`footer` 和页码起始 `pageNumberStart`。要分节就在 root 下面放 `Section`，每节能单独改这些设置；runs 里写 `{ "field": "page" }` 显示页码。细节见 [STYLE.md](STYLE.md) 第十节。
 
 样式字段、样式集（`styleSet`、`styleSets`）、部位样式和层叠顺序都在 [STYLE.md](STYLE.md)。字段名跟 CSS 走，取值以 OOXML 为准；某个格式表达不了的样式，渲染时忽略并给一次警告，不报错。
 
-完整例子见 `examples/showcase.json` 和 `examples/styles.json`。
+完整例子见 `examples/showcase.json`、`examples/styles.json`，分节和页眉页脚见 `examples/sections.json`。
 
 ## 各格式的差别
 
@@ -73,7 +73,8 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版�
 - 图片只收 png、jpeg、gif、webp。SVG 和远程图片放不进去，改成显示 alt 文字，并给警告。
 - `padding` 只在有 `border` 时生效，用作边框和文字的间距。
 - Slide 变成一个二级标题加正文，后面分页。
-- 纸张、方向、页边距按 `meta.page` 设置；表格铺满版心，`widths` 按比例分。
+- 纸张、方向、页边距、分栏按每节的设置写；表格铺满版心，`widths` 按比例分。
+- 每节末尾会多一个空段落，用来放这一节的设置（Word 自己分节也是这样）。
 
 pdf 用 Typst 排版，有这些不同：
 
@@ -86,6 +87,8 @@ html 默认是一长条网页，分页和表头重复只在打印时出现。加
 
 - 按 `meta.page` 的纸张和页边距切页，PageBreak 后面的内容从新页开始。
 - 表格跨页时续页顶上会再出现表头（`repeatHeader: false` 时不出现）。
+- 显示页眉页脚，填好页码。排完版后 `<html>` 上会有 `data-fmtagno-ready="1"`，截图或打印的脚本可以等它。
+- 屏幕上横竖混排没问题，打印时只用第一节的纸张。
 - 文件会大 500 KB 左右，打开时要等脚本排完版。
 
 ## 自定义组件
