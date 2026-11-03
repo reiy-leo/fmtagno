@@ -13,7 +13,7 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Caps, Edge, EmphasisMark, Len, LineHeight, MarkerGap,
+        Align, AnchorTo, Background, Caps, ColWidth, Edge, EmphasisMark, Len, LineHeight, MarkerGap,
         Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap, WrapMode,
     },
 };
@@ -485,10 +485,16 @@ impl Html<'_> {
         ts.border_left = None;
         ts.padding = None;
         let mut css = self.css(&ts, parent, &n.id, Ctx::Table);
-        if s.width.is_none() {
+        let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let has_auto = ws.contains(&ColWidth::Auto);
+        if s.width.is_none() && common::fills_width(&ws) {
             css.push_str("width:100%;");
         }
-        let layout = s.table_layout.map(|l| l.as_str()).unwrap_or("fixed");
+        // 有 auto 列时用自动布局，浏览器才会按内容撑开
+        let layout = s
+            .table_layout
+            .map(|l| l.as_str())
+            .unwrap_or(if has_auto { "auto" } else { "fixed" });
         let _ = write!(css, "table-layout:{layout};");
         let _ = writeln!(
             self.out,
@@ -496,20 +502,35 @@ impl Html<'_> {
             esc(&n.id),
             esc(&css)
         );
-        if let Some(w) = &p.widths {
-            let total: f32 = w.iter().sum();
-            if total > 0.0 && w.len() == g.cols {
-                self.out.push_str("<colgroup>");
-                for x in w {
-                    let _ = write!(self.out, "<col style=\"width:{:.2}%\">", x / total * 100.0);
+        if p.widths.is_some() {
+            let fixed: f32 = ws
+                .iter()
+                .map(|w| if let ColWidth::Fixed(x) = w { *x } else { 0.0 })
+                .sum();
+            let ratio: f32 = ws
+                .iter()
+                .map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 })
+                .sum();
+            self.out.push_str("<colgroup>");
+            for w in &ws {
+                match w {
+                    ColWidth::Fixed(x) => {
+                        let _ = write!(self.out, "<col style=\"width:{x}pt\">");
+                    }
+                    ColWidth::Ratio(x) if fixed > 0.0 || has_auto => {
+                        let _ = write!(
+                            self.out,
+                            "<col style=\"width:calc((100% - {fixed}pt) * {:.4})\">",
+                            x / ratio
+                        );
+                    }
+                    ColWidth::Ratio(x) => {
+                        let _ = write!(self.out, "<col style=\"width:{:.2}%\">", x / ratio * 100.0);
+                    }
+                    ColWidth::Auto => self.out.push_str("<col>"),
                 }
-                self.out.push_str("</colgroup>\n");
-            } else {
-                self.warn.push(format!(
-                    "表格 `{}` 的 widths 个数和列数对不上，改成平均分",
-                    n.id
-                ));
             }
+            self.out.push_str("</colgroup>\n");
         }
         let pad = s
             .cell_padding
@@ -549,7 +570,9 @@ impl Html<'_> {
                 let part = common::cell_parts(n, &p.look, &g, r, c);
                 let mut cs = s.inherited();
                 cs.merge(&part);
-                let mut css = self.css(&part, Some(s), &n.id, Ctx::Cell);
+                // 先写表格的 cellPadding，部位上写的 padding 跟在后面盖掉对应的边
+                let mut css = format!("padding:{pad}pt;");
+                css.push_str(&self.css(&part, Some(s), &n.id, Ctx::Cell));
                 let borders = common::cell_edges(n, &p.look, &g, r, c);
                 for (e, b) in ["top", "right", "bottom", "left"]
                     .iter()
@@ -558,9 +581,6 @@ impl Html<'_> {
                     if let Some(b) = b {
                         let _ = write!(css, "border-{e}:{};", b.css());
                     }
-                }
-                if Edge::ALL.iter().all(|e| part.padding_side(*e).is_none()) {
-                    let _ = write!(css, "padding:{pad}pt;");
                 }
                 let tag = if header { "th" } else { "td" };
                 let a = if css.is_empty() {

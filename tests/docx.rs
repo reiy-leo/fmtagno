@@ -85,3 +85,30 @@ fn line_height_multiple_is_at_least_font_size_times() {
     assert!(has(b, r#"w:line="400" w:lineRule="exact""#));
     assert!(!has(b, r#"w:lineRule="auto""#));
 }
+
+/// 固定列 + auto 列：表格不撑满，auto 列写 tcW auto、表格 autofit；部位 padding 落成 tcMar。
+#[test]
+fn auto_columns_and_part_padding() {
+    let json = r##"{
+      "version": "0.1",
+      "root": "doc",
+      "elements": {
+        "doc": { "type": "Document", "children": ["t"] },
+        "t": {
+          "type": "Table",
+          "props": { "rows": [["", "基本信息"]], "widths": ["5.65pt", "auto"], "look": { "firstRow": false, "firstColumn": true } },
+          "style": { "fontSize": 10 },
+          "parts": { "lastColumn": { "paddingLeft": 12, "paddingRight": 18 } }
+        }
+      }
+    }"##;
+    let json = json.replace(r#""firstColumn": true }"#, r#""firstColumn": true, "lastColumn": true }"#);
+    let out = fmtagno::render_str(&json, Format::Docx, None).unwrap();
+    let b = &out.bytes;
+    assert!(has(b, r#"<w:gridCol w:w="113" />"#) || has(b, r#"<w:gridCol w:w="113"/>"#));
+    assert!(has(b, r#"<w:tcW w:w="0" w:type="auto""#));
+    assert!(has(b, r#"<w:tblLayout w:type="autofit""#));
+    assert!(has(b, r#"<w:left w:w="240" w:type="dxa""#));
+    assert!(has(b, r#"<w:right w:w="360" w:type="dxa""#));
+    assert!(!has(b, r#"<w:tblW w:w="9638""#), "auto 表格不该撑满版心");
+}

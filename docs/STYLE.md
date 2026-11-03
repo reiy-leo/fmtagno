@@ -203,6 +203,20 @@ Word 的列表定义在 numbering.xml：`w:abstractNum` 下每一级一个 `w:lv
 
 表头、首行末行、奇偶行这些部位的样式见第十二节。
 
+部位上可以写 `padding`、`paddingLeft` 这些，只改落在这个部位里的格子，没写的边还用 `cellPadding`。docx 写成这一格的 w:tcMar，HTML 是 td 的 padding，PDF 是这一格的 inset。
+
+### 列宽
+
+列宽写在 Table 的 props `widths` 里，一列一个值，三种写法可以混用：
+
+- 数字：比例。固定列和 auto 列占完以后，剩下的宽度按比例分。
+- 带单位的字符串：固定宽度，比如 `"5.65pt"`、`"20mm"`。不带单位的字符串（`"5"`）当 pt。
+- `"auto"`：按格子里的文字撑开。
+
+只要有一列是比例，表格就撑满版心（或撑到样式里的 `width`）。全是固定列和 auto 列时，表格宽度就是各列加起来，不撑满。比如章节标题条：`["5.65pt", "auto"]`，左边一条细色块，右边按标题长短变宽。
+
+各格式怎么做：HTML 用自动布局，auto 列不写宽度；PDF 是 Typst 的 `auto` 列；docx 的 auto 列写 `w:tcW w:type="auto"`，表格改成 autofit，gridCol 按字数估一个初始宽度（全角字 1em、半角 0.55em，加字间距和左右 padding），Word 打开后按内容重排。有 auto 列又没写 `tableLayout` 时，三种格式都按 `auto` 布局。
+
 合并单元格（w:gridSpan、w:vMerge）放在 Table 的 props 里，不算样式。
 
 ## 十、页面（`meta.page`，对应 w:sectPr）

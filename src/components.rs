@@ -280,9 +280,11 @@ pub struct TableProps {
     #[serde(default)]
     pub columns: Vec<Inline>,
     pub rows: Vec<Vec<Inline>>,
-    /// 各列宽度的比例
+    /// 各列宽度：数字是比例，分掉固定列和 auto 列剩下的宽度；
+    /// 带单位的字符串是固定宽度（"5.65pt"、"20mm"）；"auto" 按内容撑开。
+    /// 没有比例列时表格不撑满，宽度等于各列相加。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub widths: Option<Vec<f32>>,
+    pub widths: Option<Vec<crate::style::ColWidth>>,
     #[serde(default)]
     pub look: TableLook,
 }

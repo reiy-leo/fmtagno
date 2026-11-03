@@ -26,7 +26,7 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Border, BorderStyle, Caps, Color, Edge, HAlign, Len,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, Color, ColWidth, Edge, HAlign, Len,
         LineHeight, MarkerGap, Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap,
         WrapMode,
     },
@@ -776,19 +776,14 @@ impl Markup<'_> {
     fn table(&mut self, n: &Node, p: &TableProps, parent: &Style) {
         let g = Grid::of(p);
         let s = &n.style;
-        let widths = match &p.widths {
-            Some(ws) if ws.len() == g.cols && ws.iter().all(|w| *w > 0.0) => {
-                ws.iter().map(|w| format!("{w}fr")).collect::<Vec<_>>()
-            }
-            Some(_) => {
-                self.warn.push(format!(
-                    "表格 `{}` 的 widths 个数和列数对不上，改成平均分",
-                    n.id
-                ));
-                vec!["1fr".to_string(); g.cols]
-            }
-            None => vec!["1fr".to_string(); g.cols],
-        };
+        let widths: Vec<String> = common::col_widths(p, &g, &mut self.warn, &n.id)
+            .iter()
+            .map(|w| match w {
+                ColWidth::Ratio(x) => format!("{x}fr"),
+                ColWidth::Fixed(x) => format!("{x}pt"),
+                ColWidth::Auto => "auto".to_string(),
+            })
+            .collect();
         let pad = s
             .cell_padding
             .map(|x| x.pt(s.size_pt(), 0.0))

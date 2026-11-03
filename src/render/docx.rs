@@ -25,7 +25,7 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Border, BorderStyle, Caps, Edge, HAlign, Len, LineHeight,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, ColWidth, Edge, HAlign, Len, LineHeight,
         ListStyleType, MarkerGap, Position, Side, Strike, Style as PStyle, TableLayout,
         UnderlineStyle, VerticalAlign, Wrap, WrapMode,
     },
@@ -690,27 +690,68 @@ impl Ctx<'_> {
             Some(w) => w.abs_pt(),
             None => self.content_width_pt,
         };
-        let total = units::twip(width_pt) as f32;
-        let even = vec![(total / g.cols as f32) as usize; g.cols];
-        let grid: Vec<usize> = match &p.widths {
-            Some(ws) if ws.len() == g.cols && ws.iter().sum::<f32>() > 0.0 => {
-                let sum: f32 = ws.iter().sum();
-                ws.iter().map(|x| (total * x / sum) as usize).collect()
-            }
-            Some(_) => {
-                self.warn.push(format!(
-                    "表格 `{}` 的 widths 个数和列数对不上，改成平均分",
-                    n.id
-                ));
-                even
-            }
-            None => even,
+        let pad_pt = s
+            .cell_padding
+            .map(|x| x.pt(s.size_pt(), 0.0))
+            .unwrap_or(4.0);
+        let pad = units::twip(pad_pt);
+        let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let fills = common::fills_width(&ws);
+        let empty_cell = Inline::Plain(String::new());
+        // auto 列按最宽的格子估一个初始宽度，Word 打开时按 autofit 自己再排
+        let auto_pt: Vec<f32> = (0..g.cols)
+            .map(|c| {
+                if ws[c] != ColWidth::Auto {
+                    return 0.0;
+                }
+                (0..g.rows)
+                    .map(|r| {
+                        let cells: &[Inline] = if g.has_header && r == 0 {
+                            &p.columns
+                        } else {
+                            &p.rows[r - usize::from(g.has_header)]
+                        };
+                        let part = common::cell_parts(n, &p.look, &g, r, c);
+                        let mut cs = s.inherited();
+                        cs.merge(&part);
+                        let side = |e| part.padding_side(e).unwrap_or(pad_pt);
+                        common::estimate_text_width(cells.get(c).unwrap_or(&empty_cell), &cs)
+                            + side(Edge::Left)
+                            + side(Edge::Right)
+                            + 1.0
+                    })
+                    .fold(0.0, f32::max)
+            })
+            .collect();
+        let fixed_sum: f32 = ws
+            .iter()
+            .zip(&auto_pt)
+            .map(|(w, a)| match w {
+                ColWidth::Fixed(x) => *x,
+                ColWidth::Auto => *a,
+                ColWidth::Ratio(_) => 0.0,
+            })
+            .sum();
+        let ratio_sum: f32 = ws
+            .iter()
+            .map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 })
+            .sum();
+        let rest = (width_pt - fixed_sum).max(0.0);
+        let grid_pt: Vec<f32> = ws
+            .iter()
+            .zip(&auto_pt)
+            .map(|(w, a)| match w {
+                ColWidth::Fixed(x) => *x,
+                ColWidth::Auto => *a,
+                ColWidth::Ratio(x) => rest * x / ratio_sum,
+            })
+            .collect();
+        let grid: Vec<usize> = grid_pt.iter().map(|x| units::twip(*x) as usize).collect();
+        let total: usize = if fills || s.width.is_some() {
+            units::twip(width_pt) as usize
+        } else {
+            grid.iter().sum()
         };
-        let pad = units::twip(
-            s.cell_padding
-                .map(|x| x.pt(s.size_pt(), 0.0))
-                .unwrap_or(4.0),
-        );
         let empty = Inline::Plain(String::new());
         let mut rows = Vec::new();
         for r in 0..g.rows {
@@ -749,9 +790,12 @@ impl Ctx<'_> {
                 let para = self.para(Paragraph::new(), &ps, &n.id);
                 let runs = common::rebase_runs(cells.get(c).unwrap_or(&empty), s, &cs);
                 let para = self.inline(para, runs, &n.id);
-                let mut cell = TableCell::new()
-                    .add_paragraph(para)
-                    .width(*width, WidthType::Dxa);
+                let mut cell = TableCell::new().add_paragraph(para);
+                cell = if ws[c] == ColWidth::Auto {
+                    cell.width(0, WidthType::Auto)
+                } else {
+                    cell.width(*width, WidthType::Dxa)
+                };
                 if let Some(bg) = &part.background {
                     cell = cell.shading(shading(bg));
                 }
@@ -795,9 +839,18 @@ impl Ctx<'_> {
                         _ => TextDirectionType::Lr,
                     });
                 }
-                if Edge::ALL.iter().any(|e| part.padding_side(*e).is_some()) {
-                    self.warn
-                        .unsupported(FORMAT, "单个格子的 padding（用 cellPadding）", &n.id);
+                // 部位上写的 padding 落成这一格的 w:tcMar，没写的边沿用表格的 cellPadding
+                for e in Edge::ALL {
+                    if let Some(v) = part.padding_side(e) {
+                        let v = units::twip(v) as usize;
+                        let pr = cell.property;
+                        cell.property = match e {
+                            Edge::Top => pr.margin_top(v, WidthType::Dxa),
+                            Edge::Right => pr.margin_right(v, WidthType::Dxa),
+                            Edge::Bottom => pr.margin_bottom(v, WidthType::Dxa),
+                            Edge::Left => pr.margin_left(v, WidthType::Dxa),
+                        };
+                    }
                 }
                 tcs.push(cell);
             }
@@ -814,7 +867,10 @@ impl Ctx<'_> {
             .set_grid(grid)
             .layout(match s.table_layout {
                 Some(TableLayout::Auto) => TableLayoutType::Autofit,
-                _ => TableLayoutType::Fixed,
+                Some(TableLayout::Fixed) => TableLayoutType::Fixed,
+                // 有 auto 列时让 Word 按内容排
+                None if ws.contains(&ColWidth::Auto) => TableLayoutType::Autofit,
+                None => TableLayoutType::Fixed,
             })
             .margins(TableCellMargins::new().margin(
                 pad as usize,
@@ -822,7 +878,7 @@ impl Ctx<'_> {
                 pad as usize,
                 pad as usize,
             ))
-            .width(total as usize, WidthType::Dxa);
+            .width(total, WidthType::Dxa);
         if s.page_break_before == Some(true) {
             self.page_break();
         }

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::{
     components::{Inline, ListItem, Run, TableLook, TableProps},
     doc::Node,
-    style::{Border, Edge, ListStyleType, Style},
+    style::{Border, ColWidth, Edge, ListStyleType, Style},
 };
 
 /// 同一类警告只报一次。
@@ -194,6 +194,38 @@ impl Grid {
             has_header,
         }
     }
+}
+
+/// 各列宽度；没写或个数不对时平均分（个数不对会报警告）。
+pub fn col_widths(p: &TableProps, g: &Grid, warn: &mut Warn, id: &str) -> Vec<ColWidth> {
+    match &p.widths {
+        Some(ws) if ws.len() == g.cols => ws.clone(),
+        Some(_) => {
+            warn.push(format!("表格 `{id}` 的 widths 个数和列数对不上，改成平均分"));
+            vec![ColWidth::Ratio(1.0); g.cols]
+        }
+        None => vec![ColWidth::Ratio(1.0); g.cols],
+    }
+}
+
+/// 有比例列时表格撑满（或撑到 style.width）；全是固定列和 auto 列时表格按内容收窄。
+pub fn fills_width(ws: &[ColWidth]) -> bool {
+    ws.iter().any(|w| matches!(w, ColWidth::Ratio(_)))
+}
+
+/// 粗估一段文字排成一行要多宽（pt），给 docx 的 auto 列算初始列宽用：
+/// 全角字算 1em，半角算 0.55em，再加字间距。有换行时取最长的一行。
+pub fn estimate_text_width(t: &Inline, cs: &Style) -> f32 {
+    let size = cs.size_pt();
+    let spacing = cs.letter_spacing.map(|l| l.pt(size, 0.0)).unwrap_or(0.0);
+    t.plain_text()
+        .split('\n')
+        .map(|line| {
+            line.chars()
+                .map(|c| if (c as u32) < 0x2E80 { 0.55 * size } else { size } + spacing)
+                .sum::<f32>()
+        })
+        .fold(0.0, f32::max)
 }
 
 /// 第 r 行第 c 列（都从 0 起，表头算第 0 行）的部位样式，按 Word 的顺序叠：
