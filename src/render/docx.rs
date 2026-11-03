@@ -1022,8 +1022,12 @@ impl Ctx<'_> {
             None => {}
         }
         match s.line_height {
+            // 倍数按 CSS 理解：字号 × 倍数。Word 的 auto 是乘字体自己的单倍行高
+            // （雅黑约 1.32 倍字号），会比 HTML、PDF 高出三四成，所以换成「至少」。
             Some(LineHeight::Multiple(x)) => {
-                ls = ls.line((x * 240.0) as i32).line_rule(LineSpacingType::Auto);
+                ls = ls
+                    .line(units::twip(fs * x))
+                    .line_rule(LineSpacingType::AtLeast);
                 any = true;
             }
             Some(LineHeight::Exact(l)) => {

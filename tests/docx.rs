@@ -66,3 +66,22 @@ fn table_header_repeats_and_page_break() {
     let out = fmtagno::render_str(&off, Format::Docx, None).unwrap();
     assert!(!has(&out.bytes, "<w:tblHeader"));
 }
+
+/// 倍数行距按 CSS 算（字号 × 倍数），docx 写成「至少」，不用 Word 的 auto。
+#[test]
+fn line_height_multiple_is_at_least_font_size_times() {
+    let json = r#"{
+      "version": "0.1",
+      "root": "doc",
+      "elements": {
+        "doc": { "type": "Document", "children": ["a", "b"] },
+        "a": { "type": "Text", "props": { "text": "倍数" }, "style": { "fontSize": 10, "lineHeight": 1.5 } },
+        "b": { "type": "Text", "props": { "text": "固定" }, "style": { "fontSize": 10, "lineHeight": "20pt" } }
+      }
+    }"#;
+    let out = fmtagno::render_str(json, Format::Docx, None).unwrap();
+    let b = &out.bytes;
+    assert!(has(b, r#"w:line="300" w:lineRule="atLeast""#));
+    assert!(has(b, r#"w:line="400" w:lineRule="exact""#));
+    assert!(!has(b, r#"w:lineRule="auto""#));
+}

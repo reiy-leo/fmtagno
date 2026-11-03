@@ -71,7 +71,7 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `align` | `left` `center` `right` `justify` `distribute` | w:jc（start、center、end、both、distribute） | algn（l、ctr、r、just、dist） | horizontal | text-align | align / justify |
 | `spaceBefore` | 长度或 `"Nline"` | w:spacing before / beforeLines | a:spcBef | — | margin-top | block above |
 | `spaceAfter` | 同上 | w:spacing after / afterLines | a:spcAft | — | margin-bottom | block below |
-| `lineHeight` | 数字是倍数；长度是固定值；`{ atLeast: 长度 }` 是最小值 | w:spacing line + lineRule（auto / exact / atLeast） | a:lnSpc（spcPct / spcPts） | — | line-height | par leading（近似） |
+| `lineHeight` | 数字是倍数，按 CSS 算（字号 × 倍数）；长度是固定值；`{ atLeast: 长度 }` 是最小值 | w:spacing line + lineRule（倍数写成 atLeast 字号 × 倍数，不用 auto：Word 的 auto 乘的是字体自己的单倍行高，雅黑约 1.32 倍字号；固定值 exact；最小值 atLeast） | a:lnSpc（spcPct / spcPts） | — | line-height | par leading（近似） |
 | `marginLeft` | 长度，整段左缩进 | w:ind start | marL | indent（按字符数，只有整数） | margin-left | pad |
 | `marginRight` | 长度，整段右缩进 | w:ind end | — | — | margin-right | pad |
 | `textIndent` | 长度，首行缩进 | w:ind firstLine（`em` 时用 firstLineChars） | indent（正数） | — | text-indent | first-line-indent |
