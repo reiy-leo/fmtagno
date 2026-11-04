@@ -683,12 +683,16 @@ impl Ctx<'_> {
                 ms.font_size = Some(Len::Pt(fs * pct / 100.0));
             }
             ms.merge(&marker_part);
+            // Word 的编号字号、颜色跟段落标记走，fmtagno 不写段落标记的 rPr，
+            // 没指定时就用列表文字的字号和颜色，不然编号会是 Word 默认的五号黑字
+            if ms.color.is_none() {
+                ms.color = s.color.clone();
+            }
             if let Some(c) = &ms.color {
                 level = level.color(c.rgb());
             }
-            if ms.font_size.is_some() {
-                level = level.size((ms.size_pt() * 2.0).round() as usize);
-            }
+            let msz = if ms.font_size.is_some() { ms.size_pt() } else { fs };
+            level = level.size((msz * 2.0).round() as usize);
             if ms.bold == Some(true) {
                 level = level.bold();
             }
