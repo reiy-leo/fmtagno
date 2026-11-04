@@ -139,7 +139,9 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
 @media print { body { background: none; } }
 </style>
 <style>
-/* Paged.js 不认空 div 上的 break-after，改成让下一个元素从新页开始 */
+/* Paged.js 不认空 div 上的 break-after，改成让下一个元素从新页开始；
+   空 div 自己的 break-after 去掉，不然有时会和下一个元素的 break-before 叠成两次分页，多出空白页 */
+.fmtagno-pagebreak { break-after: auto; }
 .fmtagno-pagebreak + * { break-before: page; }
 </style>
 ";
