@@ -131,8 +131,11 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
   .fmtagno-pagebreak { border-top: none; margin: 0; }
   .fmtagno-section + .fmtagno-section { border-top: none; margin-top: 0; padding-top: 0; }
 }
-.pagedjs_pagebox { position: relative; }
+.pagedjs_pagebox { position: relative; isolation: isolate; }
+.pagedjs_area { position: relative; }
 .fmtagno-hf-box { position: absolute; }
+/* 排版时先放在原地不占位，免得 Paged.js 以为它溢出了页面；排完再挪回坐标上 */
+.fmtagno-abs:not(.fmtagno-placed) { top: 0 !important; left: 0 !important; visibility: hidden; }
 @media print { body { background: none; } }
 </style>
 <style>
@@ -192,6 +195,17 @@ const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
         }
       }
       fill(x.p.element, x);
+    }
+    // 绝对定位的图挪到它所在页的纸面（anchorTo: page）或版心（margin）上，用原来写的坐标
+    for (const x of info) {
+      const box = x.p.element.querySelector('.pagedjs_pagebox');
+      const area = x.p.element.querySelector('.pagedjs_area');
+      for (const f of x.p.element.querySelectorAll('.fmtagno-abs')) {
+        const to = f.dataset.anchor === 'page' ? box : area;
+        if (!to) continue;
+        f.classList.add('fmtagno-placed');
+        to.appendChild(f);
+      }
     }
     // 排完的标记，截图、打印脚本可以等它
     document.documentElement.dataset.fmtagnoReady = '1';
@@ -657,6 +671,12 @@ impl Html<'_> {
                 }
             }
         }
+        // 相对页面或版心定位的图：--paged 时由 PAGED_ABS 挪到所在页上再按坐标放
+        let page_abs = match (s.position, s.anchor_to) {
+            (Some(Position::Absolute), Some(AnchorTo::Page)) => Some("page"),
+            (Some(Position::Absolute), Some(AnchorTo::Margin) | None) => Some("margin"),
+            _ => None,
+        };
         let mut img = String::new();
         if let Some(w) = s.width {
             let _ = write!(img, "width:{};", len_css(w));
@@ -683,8 +703,11 @@ impl Html<'_> {
         let src = self.image_src(&n.id, &p.src);
         let _ = write!(
             self.out,
-            "<figure id=\"{}\" style=\"{}\"><img src=\"{}\" alt=\"{}\" style=\"{}\">",
+            "<figure id=\"{}\"{} style=\"{}\"><img src=\"{}\" alt=\"{}\" style=\"{}\">",
             esc(&n.id),
+            page_abs
+                .map(|a| format!(" class=\"fmtagno-abs\" data-anchor=\"{a}\""))
+                .unwrap_or_default(),
             esc(&css),
             esc(&src),
             esc(&p.alt),
