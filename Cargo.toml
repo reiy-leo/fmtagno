@@ -1,6 +1,6 @@
 [package]
 name = "fmtagno"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 edition = "2024"
 description = "One JSON document, rendered through a registered component catalog to docx, pdf and html."
 license = "MIT"

@@ -126,3 +126,17 @@ fn auto_columns_shrink_to_content() {
     );
     assert!(html.contains("padding:4pt;padding-left:12pt;"), "{html}");
 }
+
+#[test]
+fn empty_text_keeps_a_line() {
+    let s = html(
+        r##"{
+      "root": "d",
+      "elements": {
+        "d": { "type": "Document", "children": ["t"] },
+        "t": { "type": "Text", "props": { "text": "" } }
+      }
+    }"##,
+    );
+    assert!(s.contains("<br></p>"), "{s}");
+}

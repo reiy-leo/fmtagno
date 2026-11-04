@@ -280,7 +280,12 @@ impl Html<'_> {
             }
             Component::Text(p) => {
                 let _ = write!(self.out, "<p id=\"{id}\"{st}>");
+                let start = self.out.len();
                 self.inline(&p.text, &n.style, &n.id);
+                // 空段落也占一行（和 Word 一样）：空 <p> 在浏览器里高度是 0
+                if self.out[start..].trim().is_empty() {
+                    self.out.push_str("<br>");
+                }
                 self.out.push_str("</p>\n");
             }
             Component::Code(p) => self.code(n, p, &st),
