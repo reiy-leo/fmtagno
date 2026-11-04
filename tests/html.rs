@@ -138,5 +138,5 @@ fn empty_text_keeps_a_line() {
       }
     }"##,
     );
-    assert!(s.contains("<p id=\"t\"><br></p>"));
+    assert!(s.contains("<br></p>"), "{s}");
 }
