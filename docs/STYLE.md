@@ -215,7 +215,7 @@ Word 的列表定义在 numbering.xml：`w:abstractNum` 下每一级一个 `w:lv
 
 只要有一列是比例，表格就撑满版心（或撑到样式里的 `width`）。全是固定列和 auto 列时，表格宽度就是各列加起来，不撑满。比如章节标题条：`["5.65pt", "auto"]`，左边一条细色块，右边按标题长短变宽。
 
-各格式怎么做：HTML 用自动布局，auto 列不写宽度；PDF 是 Typst 的 `auto` 列；docx 的 auto 列写 `w:tcW w:type="auto"`，表格改成 autofit，gridCol 按字数估一个初始宽度（全角字 1em、半角 0.55em，加字间距和左右 padding），Word 打开后按内容重排。有 auto 列又没写 `tableLayout` 时，三种格式都按 `auto` 布局。
+各格式怎么做：HTML 用自动布局，auto 列不写宽度；PDF 是 Typst 的 `auto` 列；docx 的 auto 列写 `w:tcW w:type="auto"`，表格宽度写 auto、布局改成 autofit，gridCol 按字数估一个初始宽度（全角字 1em、半角 0.6em，加字间距、左右 padding 和 3pt 余量），Word 打开后按内容重排。有 auto 列又没写 `tableLayout` 时，三种格式都按 `auto` 布局。
 
 合并单元格（w:gridSpan、w:vMerge）放在 Table 的 props 里，不算样式。
 

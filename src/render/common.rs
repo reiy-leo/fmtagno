@@ -216,7 +216,7 @@ pub fn fills_width(ws: &[ColWidth]) -> bool {
 }
 
 /// 粗估一段文字排成一行要多宽（pt），给 docx 的 auto 列算初始列宽用：
-/// 全角字算 1em，半角算 0.55em，再加字间距。有换行时取最长的一行。
+/// 全角字算 1em，半角算 0.6em（宁宽勿窄，窄了 Word 会折行），再加字间距。有换行时取最长的一行。
 pub fn estimate_text_width(t: &Inline, cs: &Style) -> f32 {
     let size = cs.size_pt();
     let spacing = cs.letter_spacing.map(|l| l.pt(size, 0.0)).unwrap_or(0.0);
@@ -224,7 +224,7 @@ pub fn estimate_text_width(t: &Inline, cs: &Style) -> f32 {
         .split('\n')
         .map(|line| {
             line.chars()
-                .map(|c| if (c as u32) < 0x2E80 { 0.55 * size } else { size } + spacing)
+                .map(|c| if (c as u32) < 0x2E80 { 0.6 * size } else { size } + spacing)
                 .sum::<f32>()
         })
         .fold(0.0, f32::max)

@@ -108,14 +108,17 @@ fn auto_columns_and_part_padding() {
     );
     let out = fmtagno::render_str(&json, Format::Docx, None).unwrap();
     let b = &out.bytes;
-    // 1420 = 4 个全角字 × 10pt + 左右 padding 12 + 18 + 1pt 余量
+    // 1460 = 4 个全角字 × 10pt + 左右 padding 12 + 18 + 3pt 余量
     assert!(has(
         b,
-        r#"<w:gridCol w:w="113" w:type="dxa" /><w:gridCol w:w="1420""#
+        r#"<w:gridCol w:w="113" w:type="dxa" /><w:gridCol w:w="1460""#
     ));
     assert!(has(b, r#"<w:tcW w:w="0" w:type="auto""#));
     assert!(has(b, r#"<w:tblLayout w:type="autofit""#));
     assert!(has(b, r#"<w:left w:w="240" w:type="dxa""#));
     assert!(has(b, r#"<w:right w:w="360" w:type="dxa""#));
-    assert!(!has(b, r#"<w:tblW w:w="9638""#), "auto 表格不该撑满版心");
+    assert!(
+        has(b, r#"<w:tblW w:w="0" w:type="auto""#),
+        "auto 表格不该撑满版心"
+    );
 }

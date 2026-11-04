@@ -718,7 +718,7 @@ impl Ctx<'_> {
                         common::estimate_text_width(cells.get(c).unwrap_or(&empty_cell), &cs)
                             + side(Edge::Left)
                             + side(Edge::Right)
-                            + 1.0
+                            + 3.0
                     })
                     .fold(0.0, f32::max)
             })
@@ -878,7 +878,15 @@ impl Ctx<'_> {
                 pad as usize,
                 pad as usize,
             ))
-            .width(total, WidthType::Dxa);
+            // 按内容收窄的表格 tblW 写 auto，不然 Word 会被这个总宽卡住，auto 列撑不开
+            .width(
+                if fills || s.width.is_some() { total } else { 0 },
+                if fills || s.width.is_some() {
+                    WidthType::Dxa
+                } else {
+                    WidthType::Auto
+                },
+            );
         if s.page_break_before == Some(true) {
             self.page_break();
         }
