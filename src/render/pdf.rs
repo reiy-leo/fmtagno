@@ -240,7 +240,11 @@ impl Markup<'_> {
                 );
             }
             Component::Text(p) => {
-                let body = self.inline(&p.text, s);
+                let mut body = self.inline(&p.text, s);
+                // 空段落也占一行（和 Word 一样），放一个零宽空格撑起行盒
+                if body.trim().is_empty() {
+                    body = "#sym.zws".into();
+                }
                 self.block(format!("#par[{body}]"), s, parent, &n.id);
             }
             Component::Code(p) => self.code(n, p, parent),
