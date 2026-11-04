@@ -11,7 +11,8 @@ use docx_rs::{
     ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, PicAlign, RelativeFromHType,
     RelativeFromVType, Run, RunFonts, Shading, ShdType, SpecialIndentType, Start, Style, StyleType,
     Table, TableCell, TableCellBorder, TableCellBorderPosition, TableCellBorders, TableCellMargins,
-    TableLayoutType, TableRow, TextDirectionType, VAlignType, VertAlignType, WidthType,
+    TableLayoutType, TableRow, TextDirectionType, VAlignType, VMergeType, VertAlignType, WidthType,
+    HeightRule,
 };
 
 use crate::{
@@ -697,7 +698,6 @@ impl Ctx<'_> {
         let pad = units::twip(pad_pt);
         let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
         let fills = common::fills_width(&ws);
-        let empty_cell = Inline::Plain(String::new());
         // auto 列按最宽的格子估一个初始宽度，Word 打开时按 autofit 自己再排
         let auto_pt: Vec<f32> = (0..g.cols)
             .map(|c| {
@@ -705,17 +705,13 @@ impl Ctx<'_> {
                     return 0.0;
                 }
                 (0..g.rows)
+                    .filter(|r| g.is_origin(*r, c) && g.slot(*r, c).col_span == 1)
                     .map(|r| {
-                        let cells: &[Inline] = if g.has_header && r == 0 {
-                            &p.columns
-                        } else {
-                            &p.rows[r - usize::from(g.has_header)]
-                        };
                         let part = common::cell_parts(n, &p.look, &g, r, c);
                         let mut cs = s.inherited();
                         cs.merge(&part);
                         let side = |e| part.padding_side(e).unwrap_or(pad_pt);
-                        common::estimate_text_width(cells.get(c).unwrap_or(&empty_cell), &cs)
+                        common::estimate_text_width(g.slot(r, c).text(), &cs)
                             + side(Edge::Left)
                             + side(Edge::Right)
                             + 3.0
@@ -752,27 +748,21 @@ impl Ctx<'_> {
         } else {
             grid.iter().sum()
         };
-        let empty = Inline::Plain(String::new());
+        g.warn_ragged(&mut self.warn, &n.id);
         let mut rows = Vec::new();
         for r in 0..g.rows {
-            let cells: &[Inline] = if g.has_header && r == 0 {
-                &p.columns
-            } else {
-                let i = r - usize::from(g.has_header);
-                if p.rows[i].len() != g.cols {
-                    self.warn.push(format!(
-                        "表格 `{}` 第 {} 行有 {} 格，按 {} 列补齐",
-                        n.id,
-                        i + 1,
-                        p.rows[i].len(),
-                        g.cols
-                    ));
-                }
-                &p.rows[i]
-            };
             let mut tcs = Vec::new();
-            for (c, width) in grid.iter().enumerate() {
-                let part = common::cell_parts(n, &p.look, &g, r, c);
+            for c in 0..g.cols {
+                let sl = *g.slot(r, c);
+                let (r0, c0) = sl.origin;
+                // 横向被合并掉的位置不写；纵向合并在下面几行写 vMerge continue 的格子
+                if c0 != c {
+                    continue;
+                }
+                let cont = r0 != r;
+                let width: usize = grid[c..c + sl.col_span].iter().sum();
+                let width = &width;
+                let part = common::cell_parts(n, &p.look, &g, r0, c0);
                 let mut cs = s.inherited();
                 cs.merge(&part);
                 let mut ps = cs.clone();
@@ -788,10 +778,24 @@ impl Ctx<'_> {
                 ps.space_before = part.space_before;
                 ps.space_after = part.space_after;
                 let para = self.para(Paragraph::new(), &ps, &n.id);
-                let runs = common::rebase_runs(cells.get(c).unwrap_or(&empty), s, &cs);
-                let para = self.inline(para, runs, &n.id);
+                let para = if cont {
+                    para
+                } else {
+                    let runs = common::rebase_runs(sl.text(), s, &cs);
+                    self.inline(para, runs, &n.id)
+                };
                 let mut cell = TableCell::new().add_paragraph(para);
-                cell = if ws[c] == ColWidth::Auto {
+                if sl.col_span > 1 {
+                    cell = cell.grid_span(sl.col_span);
+                }
+                if sl.row_span > 1 {
+                    cell = cell.vertical_merge(if cont {
+                        VMergeType::Continue
+                    } else {
+                        VMergeType::Restart
+                    });
+                }
+                cell = if sl.col_span == 1 && ws[c] == ColWidth::Auto {
                     cell.width(0, WidthType::Auto)
                 } else {
                     cell.width(*width, WidthType::Dxa)
@@ -801,12 +805,22 @@ impl Ctx<'_> {
                 }
                 // 两格之间的线只写一次：上下之间写在上面一格的下边，左右之间写在左边一格的右边。
                 // 两边都写的话 Word 会画两条（双线尤其明显）。
+                // 合并格：上下边只在第一行、最后一行写，右边取最后一列
+                let last_row = r == r0 + sl.row_span - 1;
+                let cr = c + sl.col_span - 1;
                 let mut b = common::cell_edges(n, &p.look, &g, r, c);
-                if r + 1 < g.rows {
+                b[1] = common::cell_edges(n, &p.look, &g, r, cr)[1].clone();
+                if r + 1 < g.rows && last_row {
                     b[2] = common::cell_edges(n, &p.look, &g, r + 1, c)[0].clone();
                 }
-                if c + 1 < g.cols {
-                    b[1] = common::cell_edges(n, &p.look, &g, r, c + 1)[3].clone();
+                if !last_row {
+                    b[2] = None;
+                }
+                if cont {
+                    b[0] = None;
+                }
+                if cr + 1 < g.cols {
+                    b[1] = common::cell_edges(n, &p.look, &g, r, cr + 1)[3].clone();
                 }
                 let mut borders = TableCellBorders::with_empty();
                 for (i, (pos, b)) in [
@@ -857,6 +871,13 @@ impl Ctx<'_> {
             let mut row = TableRow::new(tcs);
             if s.row_break == Some(false) {
                 row = row.cant_split();
+            }
+            if let Some(h) = g.row_height(p, r) {
+                row = row.row_height(units::twip(h.height) as f32).height_rule(if h.exact {
+                    HeightRule::Exact
+                } else {
+                    HeightRule::AtLeast
+                });
             }
             rows.push(row);
         }
@@ -1196,6 +1217,12 @@ impl Ctx<'_> {
                 continue;
             }
             let mut run = Run::new();
+            if let Some(src) = &r.image {
+                if let Some(pic) = self.inline_pic(id, src, r.width, r.height) {
+                    p = p.add_run(Run::new().add_image(pic));
+                }
+                continue;
+            }
             if let Some(f) = r.field {
                 let instr = match f {
                     Field::Page => InstrText::PAGE(InstrPAGE::new()),
@@ -1233,6 +1260,33 @@ impl Ctx<'_> {
             };
         }
         p
+    }
+
+    /// 行内图片（runs 里的 image）：按写的宽高，只写一边时按比例。
+    fn inline_pic(&mut self, id: &str, src: &str, w: Option<f32>, h: Option<f32>) -> Option<Pic> {
+        let asset = if assets::is_remote(src) {
+            Err("docx 暂不支持远程图片".to_string())
+        } else {
+            assets::load(src, self.opts.base_dir.as_deref()).map_err(|e| format!("{e:#}"))
+        };
+        let got = asset.and_then(|a| match image::load_from_memory(&a.bytes) {
+            Ok(img) => Ok((a, img.width() as f32 * 0.75, img.height() as f32 * 0.75)),
+            Err(_) => Err(format!("{} 格式放不进 docx", a.mime)),
+        });
+        let (a, pw, ph) = match got {
+            Ok(x) => x,
+            Err(why) => {
+                self.warn.push(format!("`{id}` 里的行内图片 `{src}`：{why}"));
+                return None;
+            }
+        };
+        let (w, h) = match (w, h) {
+            (Some(w), Some(h)) => (w, h),
+            (Some(w), None) => (w, w * ph / pw),
+            (None, Some(h)) => (h * pw / ph, h),
+            (None, None) => (pw, ph),
+        };
+        Some(Pic::new(&a.bytes).size(units::emu(w), units::emu(h)))
     }
 
     /// 文字属性。

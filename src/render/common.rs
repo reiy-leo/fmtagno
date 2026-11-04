@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    components::{Inline, ListItem, Run, TableLook, TableProps},
+    components::{Cell, Inline, ListItem, Run, RowHeight, TableLook, TableProps},
     doc::Node,
     style::{Border, ColWidth, Edge, ListStyleType, Style},
 };
@@ -173,27 +173,142 @@ pub fn word_level_text(style: &Style, level: usize) -> String {
 
 // ---------- 表格 ----------
 
-/// 表格展开后的一格：行列号和叠好的部位样式。
-pub struct Grid {
+/// 网格上的一个位置：属于哪一格（左上角的行列号）。被合并掉的位置 origin 指向左上角那格。
+#[derive(Clone, Copy)]
+pub struct Slot<'a> {
+    pub origin: (usize, usize),
+    pub row_span: usize,
+    pub col_span: usize,
+    /// None 是补齐出来的空格
+    pub cell: Option<&'a Cell>,
+}
+
+impl Slot<'_> {
+    pub fn text(&self) -> &Inline {
+        static EMPTY: Inline = Inline::Plain(String::new());
+        self.cell.map(Cell::text).unwrap_or(&EMPTY)
+    }
+}
+
+/// 表格展开成网格：合并单元格按 HTML 的规则摆（每行只写从这一行开始的格子，
+/// 被上面 rowSpan 占掉的位置跳过），行数按写的行数，列数取最宽的一行。
+pub struct Grid<'a> {
     pub rows: usize,
     pub cols: usize,
     pub has_header: bool,
+    pub slots: Vec<Vec<Slot<'a>>>,
+    /// (行号, 实际占的列数)：和列数对不上、补了空格的行，给渲染器报警告
+    pub ragged: Vec<(usize, usize)>,
 }
 
-impl Grid {
-    pub fn of(p: &TableProps) -> Grid {
-        let cols = p
-            .columns
-            .len()
-            .max(p.rows.iter().map(Vec::len).max().unwrap_or(0))
-            .max(1);
+impl<'a> Grid<'a> {
+    pub fn of(p: &'a TableProps) -> Grid<'a> {
         let has_header = !p.columns.is_empty();
+        let src: Vec<&'a [Cell]> = std::iter::once(p.columns.as_slice())
+            .filter(|_| has_header)
+            .chain(p.rows.iter().map(Vec::as_slice))
+            .collect();
+        let rows = src.len();
+        let mut grid: Vec<Vec<Option<Slot<'a>>>> = vec![Vec::new(); rows];
+        for (r, cells) in src.iter().enumerate() {
+            let mut c = 0;
+            for cell in cells.iter() {
+                while grid[r].get(c).is_some_and(Option::is_some) {
+                    c += 1;
+                }
+                let rs = cell.row_span().min(rows - r);
+                let cs = cell.col_span();
+                let slot = Slot {
+                    origin: (r, c),
+                    row_span: rs,
+                    col_span: cs,
+                    cell: Some(cell),
+                };
+                for row in grid.iter_mut().skip(r).take(rs) {
+                    if row.len() < c + cs {
+                        row.resize(c + cs, None);
+                    }
+                    for x in row.iter_mut().skip(c).take(cs) {
+                        // 两格重叠时先写的算数
+                        if x.is_none() {
+                            *x = Some(slot);
+                        }
+                    }
+                }
+                c += cs;
+            }
+        }
+        let cols = grid.iter().map(Vec::len).max().unwrap_or(0).max(1);
+        let mut ragged = Vec::new();
+        let slots = grid
+            .into_iter()
+            .enumerate()
+            .map(|(r, row)| {
+                let used = row.iter().filter(|x| x.is_some()).count();
+                if used != cols && rows > 0 {
+                    ragged.push((r, used));
+                }
+                (0..cols)
+                    .map(|c| {
+                        row.get(c).copied().flatten().unwrap_or(Slot {
+                            origin: (r, c),
+                            row_span: 1,
+                            col_span: 1,
+                            cell: None,
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
         Grid {
-            rows: p.rows.len() + usize::from(has_header),
+            rows,
             cols,
             has_header,
+            slots,
+            ragged,
         }
     }
+
+    pub fn slot(&self, r: usize, c: usize) -> &Slot<'a> {
+        &self.slots[r][c]
+    }
+
+    /// 这个位置是不是一格的左上角（要输出的格子）
+    pub fn is_origin(&self, r: usize, c: usize) -> bool {
+        self.slots[r][c].origin == (r, c)
+    }
+
+    /// 补齐的行报警告
+    pub fn warn_ragged(&self, warn: &mut Warn, id: &str) {
+        for (r, used) in &self.ragged {
+            warn.push(format!(
+                "表格 `{id}` 第 {} 行占 {used} 列，按 {} 列补齐",
+                r + 1,
+                self.cols
+            ));
+        }
+    }
+
+    /// 第 r 行的行高
+    pub fn row_height(&self, p: &TableProps, r: usize) -> Option<RowHeight> {
+        p.row_heights.as_ref().and_then(|v| v.get(r).copied().flatten())
+    }
+}
+
+/// 合并后的一格四条边：上、左取左上角，下取最后一行，右取最后一列。返回 上右下左。
+pub fn span_edges(n: &Node, look: &TableLook, g: &Grid, r: usize, c: usize) -> [Option<Border>; 4] {
+    let sl = g.slot(r, c);
+    let (r1, c1) = (r + sl.row_span - 1, c + sl.col_span - 1);
+    let first = cell_edges(n, look, g, r, c);
+    if (r1, c1) == (r, c) {
+        return first;
+    }
+    [
+        first[0].clone(),
+        cell_edges(n, look, g, r, c1)[1].clone(),
+        cell_edges(n, look, g, r1, c)[2].clone(),
+        first[3].clone(),
+    ]
 }
 
 /// 各列宽度；没写或个数不对时平均分（个数不对会报警告）。
@@ -285,6 +400,10 @@ pub fn cell_parts(n: &Node, look: &TableLook, g: &Grid, r: usize, c: usize) -> S
         if on {
             s.merge(&n.part(k));
         }
+    }
+    // 单格自己写的样式最后叠；合并掉的位置用左上角那格的
+    if let Some(cs) = g.slots.get(r).and_then(|x| x.get(c)).and_then(|x| x.cell).and_then(Cell::style) {
+        s.merge(cs);
     }
     s
 }

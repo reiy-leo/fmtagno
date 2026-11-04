@@ -86,6 +86,7 @@ h1, h2, h3, h4, h5, h6, p, pre, ul, ol, figure, table { margin: 0; }
 table { border-collapse: collapse; }
 th, td { text-align: inherit; vertical-align: top; font-weight: inherit; }
 figure img { max-width: 100%; height: auto; display: block; }
+.fmtagno-inline-img { display: inline-block; vertical-align: baseline; }
 pre { white-space: pre-wrap; }
 code { font: inherit; }
 .fmtagno-list { list-style: none; padding: 0; }
@@ -552,44 +553,40 @@ impl Html<'_> {
             .cell_padding
             .map(|x| x.pt(s.size_pt(), 0.0))
             .unwrap_or(4.0);
-        let empty = Inline::Plain(String::new());
         let head_sep = g.has_header && s.repeat_header.unwrap_or(true);
+        g.warn_ragged(&mut self.warn, &n.id);
         if !head_sep {
             self.out.push_str("<tbody>\n");
         }
         for r in 0..g.rows {
-            let (cells, header): (&[Inline], bool) = if g.has_header && r == 0 {
-                (&p.columns, true)
-            } else {
-                let i = r - usize::from(g.has_header);
-                if p.rows[i].len() != g.cols {
-                    self.warn.push(format!(
-                        "表格 `{}` 第 {} 行有 {} 格，按 {} 列补齐",
-                        n.id,
-                        i + 1,
-                        p.rows[i].len(),
-                        g.cols
-                    ));
-                }
-                (&p.rows[i], false)
-            };
+            let header = g.has_header && r == 0;
             if head_sep && r == 0 {
                 self.out.push_str("<thead>");
             }
-            let tr = if s.row_break == Some(false) {
-                " style=\"break-inside:avoid\""
+            let mut tr = String::new();
+            if s.row_break == Some(false) {
+                tr.push_str("break-inside:avoid;");
+            }
+            if let Some(h) = g.row_height(p, r) {
+                let _ = write!(tr, "height:{}pt;", h.height);
+            }
+            if tr.is_empty() {
+                self.out.push_str("<tr>");
             } else {
-                ""
-            };
-            let _ = write!(self.out, "<tr{tr}>");
+                let _ = write!(self.out, "<tr style=\"{tr}\">");
+            }
             for c in 0..g.cols {
+                if !g.is_origin(r, c) {
+                    continue;
+                }
+                let sl = *g.slot(r, c);
                 let part = common::cell_parts(n, &p.look, &g, r, c);
                 let mut cs = s.inherited();
                 cs.merge(&part);
                 // 先写表格的 cellPadding，部位上写的 padding 跟在后面盖掉对应的边
                 let mut css = format!("padding:{pad}pt;");
                 css.push_str(&self.css(&part, Some(s), &n.id, Ctx::Cell));
-                let borders = common::cell_edges(n, &p.look, &g, r, c);
+                let borders = common::span_edges(n, &p.look, &g, r, c);
                 for (e, b) in ["top", "right", "bottom", "left"]
                     .iter()
                     .zip(borders.iter())
@@ -599,13 +596,18 @@ impl Html<'_> {
                     }
                 }
                 let tag = if header { "th" } else { "td" };
-                let a = if css.is_empty() {
-                    String::new()
-                } else {
-                    format!(" style=\"{}\"", esc(&css))
-                };
+                let mut a = String::new();
+                if sl.row_span > 1 {
+                    let _ = write!(a, " rowspan=\"{}\"", sl.row_span);
+                }
+                if sl.col_span > 1 {
+                    let _ = write!(a, " colspan=\"{}\"", sl.col_span);
+                }
+                if !css.is_empty() {
+                    let _ = write!(a, " style=\"{}\"", esc(&css));
+                }
                 let _ = write!(self.out, "<{tag}{a}>");
-                self.inline_in(cells.get(c).unwrap_or(&empty), s, &cs, &n.id);
+                self.inline_in(sl.text(), s, &cs, &n.id);
                 let _ = write!(self.out, "</{tag}>");
             }
             self.out.push_str("</tr>\n");
@@ -772,7 +774,21 @@ impl Html<'_> {
             let _ = write!(css, "background-color:{};", h.css());
         }
         let mut text = esc(&r.text).replace('\n', "<br>");
-        if let Some(f) = r.field {
+        if let Some(src) = &r.image {
+            let mut st = String::new();
+            if let Some(w) = r.width {
+                let _ = write!(st, "width:{w}pt;");
+            }
+            if let Some(h) = r.height {
+                let _ = write!(st, "height:{h}pt;");
+            }
+            let src = self.image_src(id, src);
+            text = format!(
+                "<img class=\"fmtagno-inline-img\" src=\"{}\" alt=\"{}\" style=\"{st}\">",
+                esc(&src),
+                esc(&r.text)
+            );
+        } else if let Some(f) = r.field {
             let k = match f {
                 Field::Page => "page",
                 Field::Pages => "pages",
