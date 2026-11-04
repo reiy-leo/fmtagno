@@ -269,7 +269,7 @@ const VARS: &str = r##"{
   "elements": {
     "d": { "type": "Document", "children": ["h", "t"] },
     "h": { "type": "Heading", "props": { "level": 1, "text": "标题" } },
-    "t": { "type": "Text", "props": { "runs": [{ "text": "绿", "color": "${color2}" }, "价 $${x}"] }, "style": ["box", { "color": "${color1}" }] }
+    "t": { "type": "Text", "props": { "text": [{ "text": "绿", "color": "${color2}" }, "价 $${x}"] }, "style": ["box", { "color": "${color1}" }] }
   }
 }"##;
 
