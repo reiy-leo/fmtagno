@@ -282,7 +282,7 @@ fn style_set_variables() {
     assert!(h.contains("价 ${x}"));
     all_formats(VARS);
 
-    let e = err(&VARS.replace(r#""${color2}" }]"#, r#""${nope}" }]"#));
+    let e = err(&VARS.replace(r#""color": "${color2}" }"#, r#""color": "${nope}" }"#));
     assert!(e.contains("${nope}") && e.contains("没定义"), "{e}");
     let e = err(&VARS
         .replace(r#""$gap": 6"#, r#""$gap": "${line}""#)
