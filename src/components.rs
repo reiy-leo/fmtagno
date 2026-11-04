@@ -329,7 +329,8 @@ pub enum Cell {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CellObj {
-    #[serde(default)]
+    /// 文字：字符串，或 run 数组；也可以写成 runs
+    #[serde(default, alias = "runs")]
     pub text: Inline,
     /// 往下合并几行（含自己），默认 1
     #[serde(rename = "rowSpan", default, skip_serializing_if = "Option::is_none")]
