@@ -16,9 +16,7 @@ use docx_rs::{
 
 use crate::{
     assets,
-    components::{
-        CodeProps, Component, Field, ImageProps, ListProps, Run as PRun, TableProps,
-    },
+    components::{CodeProps, Component, Field, ImageProps, ListProps, Run as PRun, TableProps},
     doc::{Doc, Node, Page, SectionLayout},
     render::{
         Options, Output,

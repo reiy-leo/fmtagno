@@ -625,7 +625,10 @@ impl Doc {
         if !spec.container && !el.children.is_empty() {
             bail!("元素 `{id}`：{} 不能有 children", el.kind);
         }
-        let mut component = components::parse(&el.kind, &el.props)
+        let props = sheet
+            .subst(&el.props)
+            .with_context(|| format!("元素 `{id}`（{}）的 props 不对", el.kind))?;
+        let mut component = components::parse(&el.kind, &props)
             .with_context(|| format!("元素 `{id}`（{}）的 props 不对", el.kind))?;
         let (style, parts) = sheet
             .element(el, spec, &component, parent)
