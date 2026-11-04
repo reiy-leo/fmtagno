@@ -109,3 +109,20 @@ fn paged_mode_embeds_pagedjs() {
     let plain = fmtagno::render_str(json, fmtagno::render::Format::Html, None).unwrap();
     assert!(!String::from_utf8(plain.bytes).unwrap().contains("Paged.js"));
 }
+
+/// 固定列 + auto 列：不写 width:100%，用自动布局；部位 padding 盖在 cellPadding 后面。
+#[test]
+fn auto_columns_shrink_to_content() {
+    let json = r##"{"root":"d","elements":{"d":{"type":"Document","children":["t"]},
+      "t":{"type":"Table","props":{"rows":[["","基本信息"]],"widths":["5.65pt","auto"],"look":{"firstRow":false,"lastColumn":true}},
+           "parts":{"lastColumn":{"paddingLeft":12}}}}}"##;
+    let out = fmtagno::render_str(json, Format::Html, None).unwrap();
+    let html = String::from_utf8(out.bytes).unwrap();
+    assert!(!html.contains("width:100%"), "{html}");
+    assert!(html.contains("table-layout:auto"), "{html}");
+    assert!(
+        html.contains(r#"<col style="width:5.65pt"><col>"#),
+        "{html}"
+    );
+    assert!(html.contains("padding:4pt;padding-left:12pt;"), "{html}");
+}

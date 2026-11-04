@@ -34,3 +34,12 @@ fn styled_blocks_span_full_width() {
     assert!(src.contains("width: 100%"), "{src}");
     assert!(src.contains("#set align(right)"), "{src}");
 }
+
+#[test]
+fn table_column_widths_mix_ratio_fixed_auto() {
+    let d = fmtagno::doc::parse(r##"{"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Table","props":{"rows":[["a","b","c"]],"widths":["20mm","auto",2]}}}}"##).unwrap();
+    let tree = d.tree().unwrap();
+    let (src, _, _) = fmtagno::render::pdf::markup(&d, &tree, &Default::default());
+    assert!(src.contains("columns: (56.69"), "{src}");
+    assert!(src.contains("pt, auto, 2fr,)"), "{src}");
+}

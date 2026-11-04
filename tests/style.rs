@@ -250,3 +250,44 @@ fn page_and_paragraph_fields() {
     assert!(s.contains("float:right"));
     all_formats(json);
 }
+
+const VARS: &str = r##"{
+  "version": "0.1",
+  "styleSet": "child",
+  "styleSets": {
+    "base": {
+      "global": { "$color1": "#8DC63F", "$gap": 6, "$line": "1pt solid ${color1}", "fontSize": 11 },
+      "components": { "Heading": { "color": "${color1}", "spaceAfter": "${gap}" } }
+    },
+    "child": {
+      "extends": "base",
+      "global": { "$color2": "#123456" },
+      "styles": { "box": { "borderBottom": "${line}", "background": "${color2}" } }
+    }
+  },
+  "root": "d",
+  "elements": {
+    "d": { "type": "Document", "children": ["h", "t"] },
+    "h": { "type": "Heading", "props": { "level": 1, "text": "标题" } },
+    "t": { "type": "Text", "props": { "text": [{ "text": "绿", "color": "${color2}" }, "价 $${x}"] }, "style": ["box", { "color": "${color1}" }] }
+  }
+}"##;
+
+/// global 里 `$名字` 定义变量，样式、props 里 `${名字}` 引用；父样式集的变量子样式集也能用。
+#[test]
+fn style_set_variables() {
+    let h = html(VARS);
+    assert!(h.to_lowercase().contains("#8dc63f"), "{h}");
+    assert!(h.to_lowercase().contains("#123456"));
+    assert!(h.contains("价 ${x}"));
+    all_formats(VARS);
+
+    let e = err(&VARS.replace(r#""color": "${color2}" }"#, r#""color": "${nope}" }"#));
+    assert!(e.contains("${nope}") && e.contains("没定义"), "{e}");
+    let e = err(&VARS
+        .replace(r#""$gap": 6"#, r#""$gap": "${line}""#)
+        .replace(r#""$line": "1pt solid ${color1}""#, r#""$line": "${gap}""#));
+    assert!(e.contains("成环"), "{e}");
+    let e = err(&VARS.replace(r#""$color2""#, r#""$bad name""#));
+    assert!(e.contains("变量名"), "{e}");
+}

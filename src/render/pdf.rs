@@ -26,7 +26,7 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Border, BorderStyle, Caps, Color, Edge, HAlign, Len,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, ColWidth, Color, Edge, HAlign, Len,
         LineHeight, MarkerGap, Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap,
         WrapMode,
     },
@@ -609,6 +609,19 @@ impl Markup<'_> {
             return String::new();
         }
         let mut piece = String::new();
+        if let Some(src) = &r.image {
+            let Some(path) = self.asset_path(&r.text, src) else {
+                return String::new();
+            };
+            let mut args = vec![lit(&path)];
+            if let Some(w) = r.width {
+                args.push(format!("width: {w}pt"));
+            }
+            if let Some(h) = r.height {
+                args.push(format!("height: {h}pt"));
+            }
+            return format!("#box(image({}))", args.join(", "));
+        }
         if let Some(f) = r.field {
             let key = match f {
                 Field::Page => "page",
@@ -776,47 +789,37 @@ impl Markup<'_> {
     fn table(&mut self, n: &Node, p: &TableProps, parent: &Style) {
         let g = Grid::of(p);
         let s = &n.style;
-        let widths = match &p.widths {
-            Some(ws) if ws.len() == g.cols && ws.iter().all(|w| *w > 0.0) => {
-                ws.iter().map(|w| format!("{w}fr")).collect::<Vec<_>>()
-            }
-            Some(_) => {
-                self.warn.push(format!(
-                    "表格 `{}` 的 widths 个数和列数对不上，改成平均分",
-                    n.id
-                ));
-                vec!["1fr".to_string(); g.cols]
-            }
-            None => vec!["1fr".to_string(); g.cols],
-        };
+        let widths: Vec<String> = common::col_widths(p, &g, &mut self.warn, &n.id)
+            .iter()
+            .map(|w| match w {
+                ColWidth::Ratio(x) => format!("{x}fr"),
+                ColWidth::Fixed(x) => format!("{x}pt"),
+                ColWidth::Auto => "auto".to_string(),
+            })
+            .collect();
         let pad = s
             .cell_padding
             .map(|x| x.pt(s.size_pt(), 0.0))
             .unwrap_or(4.0);
-        let empty = Inline::Plain(String::new());
         let mut header = Vec::new();
         let mut body = Vec::new();
+        g.warn_ragged(&mut self.warn, &n.id);
+        let mut exact_rows = Vec::new();
         for r in 0..g.rows {
-            let cells: &[Inline] = if g.has_header && r == 0 {
-                &p.columns
-            } else {
-                let i = r - usize::from(g.has_header);
-                if p.rows[i].len() != g.cols {
-                    self.warn.push(format!(
-                        "表格 `{}` 第 {} 行有 {} 格，按 {} 列补齐",
-                        n.id,
-                        i + 1,
-                        p.rows[i].len(),
-                        g.cols
-                    ));
-                }
-                &p.rows[i]
-            };
+            let rh = g.row_height(p, r);
+            exact_rows.push(match rh {
+                Some(h) if h.exact => format!("{}pt", h.height),
+                _ => "auto".to_string(),
+            });
             for c in 0..g.cols {
+                if !g.is_origin(r, c) {
+                    continue;
+                }
+                let sl = *g.slot(r, c);
                 let part = common::cell_parts(n, &p.look, &g, r, c);
                 let mut cs = s.inherited();
                 cs.merge(&part);
-                let text = self.inline_in(cells.get(c).unwrap_or(&empty), s, &cs);
+                let mut text = self.inline_in(sl.text(), s, &cs);
                 let mut sets = self.text_args(&cs, s, &n.id);
                 if !sets.is_empty() {
                     sets = format!("#set text({sets})\n");
@@ -833,7 +836,13 @@ impl Markup<'_> {
                 if let Some(bg) = &part.background {
                     args.push(format!("fill: {}", bg_src(bg)));
                 }
-                let b = common::cell_edges(n, &p.look, &g, r, c);
+                let b = common::span_edges(n, &p.look, &g, r, c);
+                if sl.row_span > 1 {
+                    args.push(format!("rowspan: {}", sl.row_span));
+                }
+                if sl.col_span > 1 {
+                    args.push(format!("colspan: {}", sl.col_span));
+                }
                 let st: Vec<String> = ["top", "right", "bottom", "left"]
                     .iter()
                     .zip(b.iter())
@@ -864,6 +873,19 @@ impl Markup<'_> {
                     [b[0].as_ref(), b[1].as_ref(), b[2].as_ref(), b[3].as_ref()],
                     [ins[0], ins[1], ins[2], ins[3]],
                 );
+                // 最小行高：Typst 的行只有固定高度，最小高度靠把内容撑到那么高（只看单行的格子）
+                if let Some(h) = rh.filter(|h| !h.exact && sl.row_span == 1) {
+                    let min = (h.height - ins[0] - ins[2]).max(0.0);
+                    let va = match part.vertical_align {
+                        Some(VerticalAlign::Middle) => "horizon",
+                        Some(VerticalAlign::Bottom) => "bottom",
+                        _ => "top",
+                    };
+                    text = format!(
+                        "#layout(sz => {{ let c = [{sets}{text}]; let h = measure(block(width: sz.width, c)).height; block(height: calc.max(h, {min}pt), width: 100%, align({va}, c)) }})"
+                    );
+                    sets = String::new();
+                }
                 let cell = format!("table.cell({})[{dbl}{sets}{text}]", args.join(", "));
                 if g.has_header && r == 0 {
                     header.push(cell);
@@ -885,8 +907,9 @@ impl Markup<'_> {
         }
         all.extend(body);
         let src = format!(
-            "#table(columns: ({},), stroke: none, inset: 0pt, {})",
+            "#table(columns: ({},), rows: ({},), stroke: none, inset: 0pt, {})",
             widths.join(", "),
+            exact_rows.join(", "),
             all.join(", ")
         );
         // 边框和背景已经落到格子上
@@ -1026,10 +1049,7 @@ impl Markup<'_> {
                     (_, Some(VerticalAlign::Bottom)) => "bottom + left".into(),
                     _ => "top + left".into(),
                 };
-                let _ = writeln!(
-                    self.out,
-                    "#place({al}, dx: {x}pt, dy: {y}pt, scope: \"parent\", float: false)[{fig}]"
-                );
+                let _ = writeln!(self.out, "#place({al}, dx: {x}pt, dy: {y}pt)[{fig}]");
             }
         }
     }

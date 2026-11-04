@@ -78,6 +78,8 @@ pub struct Sheet {
     comp: BTreeMap<String, Style>,
     named_set: BTreeMap<String, Style>,
     named_top: BTreeMap<String, Style>,
+    /// 变量：样式集 global 里 `$名字` 定义，`${名字}` 引用
+    vars: BTreeMap<String, Value>,
 }
 
 impl Sheet {
@@ -118,20 +120,50 @@ impl Sheet {
                 cur = def.extends.clone();
                 chain.push(n);
             }
+            // 先收齐变量（子样式集覆盖父的），后面的样式值才能引用
+            let mut globals = Vec::new();
             for n in chain.iter().rev() {
+                let ctx = || format!("样式集 `{n}`");
+                let g = match &sets[n].global {
+                    Some(Value::Object(m)) => {
+                        let mut rest = serde_json::Map::new();
+                        for (k, v) in m {
+                            if let Some(name) = k.strip_prefix('$') {
+                                check_var_name(name).with_context(ctx)?;
+                                sheet.vars.insert(name.to_string(), v.clone());
+                            } else {
+                                rest.insert(k.clone(), v.clone());
+                            }
+                        }
+                        Some(Value::Object(rest))
+                    }
+                    Some(v) => Some(v.clone()),
+                    None => None,
+                };
+                globals.push(g);
+            }
+            sheet.expand_vars()?;
+            for (n, g) in chain.iter().rev().zip(globals) {
                 let def = &sets[n];
                 let ctx = || format!("样式集 `{n}`");
-                if let Some(g) = &def.global {
-                    style::check_inherited_fields(g, "样式集的 global ").with_context(ctx)?;
-                    root.merge(&style::parse_object(g).with_context(ctx)?);
+                if let Some(g) = &g {
+                    let g = sheet.subst(g).with_context(ctx)?;
+                    style::check_inherited_fields(&g, "样式集的 global ").with_context(ctx)?;
+                    root.merge(&style::parse_object(&g).with_context(ctx)?);
                 }
                 for (k, v) in &def.components {
                     check_component_key(k, &names).with_context(ctx)?;
-                    let s = parse_obj(v).with_context(|| format!("样式集 `{n}` 的 `{k}`"))?;
+                    let s = sheet
+                        .subst(v)
+                        .and_then(|v| parse_obj(&v))
+                        .with_context(|| format!("样式集 `{n}` 的 `{k}`"))?;
                     sheet.comp.entry(k.clone()).or_default().merge(&s);
                 }
                 for (k, v) in &def.styles {
-                    let s = parse_obj(v).with_context(|| format!("样式集 `{n}` 的样式 `{k}`"))?;
+                    let s = sheet
+                        .subst(v)
+                        .and_then(|v| parse_obj(&v))
+                        .with_context(|| format!("样式集 `{n}` 的样式 `{k}`"))?;
                     sheet.named_set.insert(k.clone(), s);
                 }
             }
@@ -139,7 +171,10 @@ impl Sheet {
 
         // 顶层 styles：组件样式叠在样式集后面，其他是命名样式
         for (k, v) in &doc.styles {
-            let s = parse_obj(v).with_context(|| format!("styles 里的 `{k}`"))?;
+            let s = sheet
+                .subst(v)
+                .and_then(|v| parse_obj(&v))
+                .with_context(|| format!("styles 里的 `{k}`"))?;
             if names.contains(head(k)) {
                 check_component_key(k, &names)?;
                 sheet.comp.entry(k.clone()).or_default().merge(&s);
@@ -149,6 +184,102 @@ impl Sheet {
         }
         sheet.root = root;
         Ok(sheet)
+    }
+
+    /// 把值里的 `${名字}` 换成变量。整个字符串就是一个引用时换成变量原值（数字、对象都行），
+    /// 夹在别的文字里时按文字拼进去；`$${` 写出字面的 `${`。
+    pub fn subst(&self, v: &Value) -> Result<Value> {
+        self.subst_in(v, &mut Vec::new())
+    }
+
+    fn subst_in(&self, v: &Value, stack: &mut Vec<String>) -> Result<Value> {
+        Ok(match v {
+            Value::String(s) if s.contains("${") => self.subst_str(s, stack)?,
+            Value::Array(a) => Value::Array(
+                a.iter()
+                    .map(|x| self.subst_in(x, stack))
+                    .collect::<Result<_>>()?,
+            ),
+            Value::Object(m) => {
+                let mut out = serde_json::Map::new();
+                for (k, x) in m {
+                    out.insert(k.clone(), self.subst_in(x, stack)?);
+                }
+                Value::Object(out)
+            }
+            _ => v.clone(),
+        })
+    }
+
+    fn var(&self, name: &str, stack: &mut Vec<String>) -> Result<Value> {
+        if stack.iter().any(|n| n == name) {
+            bail!("变量互相引用成环了：{} → {name}", stack.join(" → "));
+        }
+        let v = self.vars.get(name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "变量 `${{{name}}}` 没定义；在样式集的 global 里写 \"${name}\": 值{}",
+                if self.vars.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "。现有：{}",
+                        self.vars.keys().cloned().collect::<Vec<_>>().join(" ")
+                    )
+                }
+            )
+        })?;
+        stack.push(name.to_string());
+        let out = self.subst_in(v, stack);
+        stack.pop();
+        out
+    }
+
+    fn subst_str(&self, s: &str, stack: &mut Vec<String>) -> Result<Value> {
+        // 整个字符串就是 ${x}：保留变量原来的类型
+        if let Some(name) = s.strip_prefix("${").and_then(|r| r.strip_suffix('}'))
+            && !name.contains(['{', '}', '$'])
+        {
+            return self.var(name, stack);
+        }
+        let mut out = String::new();
+        let mut rest = s;
+        while let Some(i) = rest.find('$') {
+            out.push_str(&rest[..i]);
+            let after = &rest[i..];
+            if let Some(r) = after.strip_prefix("$${") {
+                out.push_str("${");
+                rest = r;
+            } else if let Some(r) = after.strip_prefix("${") {
+                let end = r
+                    .find('}')
+                    .ok_or_else(|| anyhow::anyhow!("`{s}` 里的 ${{ 没有配对的 }}"))?;
+                let name = &r[..end];
+                match self.var(name, stack)? {
+                    Value::String(x) => out.push_str(&x),
+                    Value::Number(x) => out.push_str(&x.to_string()),
+                    Value::Bool(x) => out.push_str(&x.to_string()),
+                    _ => bail!(
+                        "变量 `${{{name}}}` 不是文字或数字，只能单独整个引用，不能拼在 `{s}` 里"
+                    ),
+                }
+                rest = &r[end + 1..];
+            } else {
+                out.push('$');
+                rest = &after[1..];
+            }
+        }
+        out.push_str(rest);
+        Ok(Value::String(out))
+    }
+
+    /// 变量值里也能引用别的变量：先全部展开，顺便查出成环和未定义。
+    fn expand_vars(&mut self) -> Result<()> {
+        let mut done = BTreeMap::new();
+        for k in self.vars.keys() {
+            done.insert(k.clone(), self.var(k, &mut Vec::new())?);
+        }
+        self.vars = done;
+        Ok(())
     }
 
     /// 根元素的「父样式」：内置全局默认值加样式集 global。
@@ -162,6 +293,7 @@ impl Sheet {
 
     /// 解析 `style` 的值：样式名、样式名数组或样式对象。
     pub fn resolve(&self, v: &Value) -> Result<Style> {
+        let v = &self.subst(v)?;
         let mut out = Style::default();
         match v {
             Value::Null => {}
@@ -346,6 +478,17 @@ fn check_component_key(k: &str, names: &HashSet<&str>) -> Result<()> {
             }
             None => bail!("`{k}`：只有内置组件能用「组件名.部位」"),
         }
+    }
+    Ok(())
+}
+
+fn check_var_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        bail!("变量名 `${name}` 只能用字母、数字、_ 和 -");
     }
     Ok(())
 }

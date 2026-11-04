@@ -118,6 +118,44 @@ fn num(n: &str, whole: &str) -> Result<f32> {
 
 value_type!(Len, "Length", { "anyOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?[0-9.]+(pt|mm|cm|in|px|em|line|%)?$" }] });
 
+/// 表格一列的宽：数字是比例（分剩下的宽度），带单位的字符串是固定长度，`"auto"` 按内容撑开。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColWidth {
+    Ratio(f32),
+    Fixed(f32),
+    Auto,
+}
+
+impl ColWidth {
+    pub fn from_value(v: &Value) -> Result<ColWidth> {
+        match v {
+            Value::Number(n) => {
+                let x = n.as_f64().unwrap_or(0.0) as f32;
+                if x <= 0.0 {
+                    bail!("列宽比例要大于 0");
+                }
+                Ok(ColWidth::Ratio(x))
+            }
+            Value::String(t) if t.trim() == "auto" => Ok(ColWidth::Auto),
+            Value::String(t) => match Len::parse(t)? {
+                Len::Pt(x) if x > 0.0 => Ok(ColWidth::Fixed(x)),
+                _ => bail!("列宽 `{t}` 要写数字（比例）、绝对长度（如 \"20mm\"）或 \"auto\""),
+            },
+            _ => bail!("列宽要写数字（比例）、绝对长度（如 \"20mm\"）或 \"auto\""),
+        }
+    }
+
+    fn to_value(self) -> Value {
+        match self {
+            ColWidth::Ratio(x) => serde_json::json!(x),
+            ColWidth::Fixed(x) => format!("{x}pt").into(),
+            ColWidth::Auto => "auto".into(),
+        }
+    }
+}
+
+value_type!(ColWidth, "ColWidth", { "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "const": "auto" }, { "type": "string", "pattern": "^[0-9.]+(pt|mm|cm|in|px)?$" }] });
+
 pub const DEFAULT_FONT_SIZE: f32 = 10.5;
 
 // ---------- 颜色 ----------

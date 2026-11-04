@@ -625,7 +625,10 @@ impl Doc {
         if !spec.container && !el.children.is_empty() {
             bail!("元素 `{id}`：{} 不能有 children", el.kind);
         }
-        let mut component = components::parse(&el.kind, &el.props)
+        let props = sheet
+            .subst(&el.props)
+            .with_context(|| format!("元素 `{id}`（{}）的 props 不对", el.kind))?;
+        let mut component = components::parse(&el.kind, &props)
             .with_context(|| format!("元素 `{id}`（{}）的 props 不对", el.kind))?;
         let (style, parts) = sheet
             .element(el, spec, &component, parent)
@@ -635,6 +638,17 @@ impl Doc {
                 r.computed = sheet
                     .run(r, &style)
                     .with_context(|| format!("元素 `{id}` 里文字 `{}` 的样式不对", r.text))?;
+            }
+        }
+        if let Component::Table(t) = &mut component {
+            for c in t.columns.iter_mut().chain(t.rows.iter_mut().flatten()) {
+                if let crate::components::Cell::Full(c) = c
+                    && let Some(v) = &c.style
+                {
+                    c.computed = sheet
+                        .resolve(v)
+                        .with_context(|| format!("元素 `{id}` 里格子的 style 不对"))?;
+                }
             }
         }
         let mut children = Vec::with_capacity(el.children.len());

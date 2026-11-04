@@ -71,7 +71,7 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `align` | `left` `center` `right` `justify` `distribute` | w:jc（start、center、end、both、distribute） | algn（l、ctr、r、just、dist） | horizontal | text-align | align / justify |
 | `spaceBefore` | 长度或 `"Nline"` | w:spacing before / beforeLines | a:spcBef | — | margin-top | block above |
 | `spaceAfter` | 同上 | w:spacing after / afterLines | a:spcAft | — | margin-bottom | block below |
-| `lineHeight` | 数字是倍数；长度是固定值；`{ atLeast: 长度 }` 是最小值 | w:spacing line + lineRule（auto / exact / atLeast） | a:lnSpc（spcPct / spcPts） | — | line-height | par leading（近似） |
+| `lineHeight` | 数字是倍数，按 CSS 算（字号 × 倍数）；长度是固定值；`{ atLeast: 长度 }` 是最小值 | w:spacing line + lineRule（倍数写成 atLeast 字号 × 倍数，不用 auto：Word 的 auto 乘的是字体自己的单倍行高，雅黑约 1.32 倍字号；固定值 exact；最小值 atLeast） | a:lnSpc（spcPct / spcPts） | — | line-height | par leading（近似） |
 | `marginLeft` | 长度，整段左缩进 | w:ind start | marL | indent（按字符数，只有整数） | margin-left | pad |
 | `marginRight` | 长度，整段右缩进 | w:ind end | — | — | margin-right | pad |
 | `textIndent` | 长度，首行缩进 | w:ind firstLine（`em` 时用 firstLineChars） | indent（正数） | — | text-indent | first-line-indent |
@@ -203,7 +203,47 @@ Word 的列表定义在 numbering.xml：`w:abstractNum` 下每一级一个 `w:lv
 
 表头、首行末行、奇偶行这些部位的样式见第十二节。
 
-合并单元格（w:gridSpan、w:vMerge）放在 Table 的 props 里，不算样式。
+部位上可以写 `padding`、`paddingLeft` 这些，只改落在这个部位里的格子，没写的边还用 `cellPadding`。docx 写成这一格的 w:tcMar，HTML 是 td 的 padding，PDF 是这一格的 inset。
+
+### 列宽
+
+列宽写在 Table 的 props `widths` 里，一列一个值，三种写法可以混用：
+
+- 数字：比例。固定列和 auto 列占完以后，剩下的宽度按比例分。
+- 带单位的字符串：固定宽度，比如 `"5.65pt"`、`"20mm"`。不带单位的字符串（`"5"`）当 pt。
+- `"auto"`：按格子里的文字撑开。
+
+只要有一列是比例，表格就撑满版心（或撑到样式里的 `width`）。全是固定列和 auto 列时，表格宽度就是各列加起来，不撑满。比如章节标题条：`["5.65pt", "auto"]`，左边一条细色块，右边按标题长短变宽。
+
+各格式怎么做：HTML 用自动布局，auto 列不写宽度；PDF 是 Typst 的 `auto` 列；docx 的 auto 列写 `w:tcW w:type="auto"`，表格宽度写 auto、布局改成 autofit，gridCol 按字数估一个初始宽度（全角字 1em、半角 0.6em，加字间距、左右 padding 和 3pt 余量），Word 打开后按内容重排。有 auto 列又没写 `tableLayout` 时，三种格式都按 `auto` 布局。
+
+### 合并单元格、单格样式、行高
+
+`rows` 和 `columns` 里的格子可以写字符串、run 数组，也可以写成对象：
+
+```json
+{ "text": "检测结果", "rowSpan": 2, "colSpan": 3, "style": { "borderLeft": "6pt solid #8DC63F" } }
+```
+
+- `text`（也可以叫 `runs`）：字符串或 run 数组。
+- `rowSpan`、`colSpan`：往下、往右合并几格，含自己。被合并掉的位置在后面的行里不用写，行里少写几格就行。超出表格或互相重叠会报错或给警告。
+- `style`：只给这一格的样式，叠在部位样式之后。合并格的边框按整块算：上边框写在首行，下边框写在末行。docx 是 w:gridSpan、w:vMerge，HTML 是 rowspan、colspan，PDF 是 table.cell 的 rowspan、colspan。
+
+行高写在 props `rowHeights`，一行一个值：
+
+- 长度（`"28.35pt"`、数字当 pt）：最小高度，内容多了会撑高。docx 写 `w:hRule="atLeast"`，HTML 是 tr 的 height，PDF 只对单行文字的格子有效。
+- `{ "height": "51.05pt", "rule": "exact" }`：固定高度，内容多了会被裁掉。docx 写 `w:hRule="exact"`，PDF 是 Typst 的 rows。
+- `null`：这一行不管。
+
+### 行内图片
+
+run 里写 `image` 就是行内图片，格子、段落、页眉页脚里都能用：
+
+```json
+{ "image": "images/logo.png", "width": 78.4, "height": 39.3 }
+```
+
+`width`、`height` 单位 pt，只写一个时按图片比例算另一个。docx 是 wp:inline，HTML 是 img，PDF 是 box(image)。
 
 ## 十、页面（`meta.page`，对应 w:sectPr）
 
@@ -307,6 +347,23 @@ runs 里写 `{ "field": "page" }` 是当前页码，`"pages"` 是全文总页数
 - 顶层 `styles` 不属于任何样式集。键是组件名或「组件名。部位」时是组件样式，其他是命名样式。
 - 样式集之间用 `extends` 继承，只能单继承，成环报错。
 - `global` 里只放会继承的字段（文字和段落），写边框、背景这类字段会报错，因为它们不该铺到每个组件上。
+
+#### 变量
+
+`global` 里以 `$` 开头的键是变量，不是样式字段。用的地方写 `${名字}`：
+
+```json
+"global": { "$color1": "#8DC63F", "$color2": "#666666", "$line": "1pt solid ${color1}", "fontSize": 11 },
+"components": { "Heading": { "color": "${color1}" } },
+"styles": { "box": { "borderBottom": "${line}" } }
+```
+
+- 变量能在样式集的 `components`、`styles`、`global`，顶层 `styles`，元素的 `style`、`parts`、单格 `style`，以及组件 props（比如 run 的 `color`、自定义组件的参数）里用。
+- 整个值就是 `${x}` 时，换成变量原来的值，数字、对象都行；夹在别的文字里时按文字拼进去，这时变量只能是文字或数字。
+- 变量值里也能引用别的变量，成环会报错；没定义的变量也报错。
+- `extends` 的子样式集能用父样式集的变量，同名的子样式集覆盖父的。
+- 要写字面的 `${`，写成 `$${`。
+- 没选样式集时没有变量。
 
 组件样式的键：
 

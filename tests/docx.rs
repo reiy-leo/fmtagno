@@ -66,3 +66,59 @@ fn table_header_repeats_and_page_break() {
     let out = fmtagno::render_str(&off, Format::Docx, None).unwrap();
     assert!(!has(&out.bytes, "<w:tblHeader"));
 }
+
+/// 倍数行距按 CSS 算（字号 × 倍数），docx 写成「至少」，不用 Word 的 auto。
+#[test]
+fn line_height_multiple_is_at_least_font_size_times() {
+    let json = r#"{
+      "version": "0.1",
+      "root": "doc",
+      "elements": {
+        "doc": { "type": "Document", "children": ["a", "b"] },
+        "a": { "type": "Text", "props": { "text": "倍数" }, "style": { "fontSize": 10, "lineHeight": 1.5 } },
+        "b": { "type": "Text", "props": { "text": "固定" }, "style": { "fontSize": 10, "lineHeight": "20pt" } }
+      }
+    }"#;
+    let out = fmtagno::render_str(json, Format::Docx, None).unwrap();
+    let b = &out.bytes;
+    assert!(has(b, r#"w:line="300" w:lineRule="atLeast""#));
+    assert!(has(b, r#"w:line="400" w:lineRule="exact""#));
+    assert!(!has(b, r#"w:lineRule="auto""#));
+}
+
+/// 固定列 + auto 列：表格不撑满，auto 列写 tcW auto、表格 autofit；部位 padding 落成 tcMar。
+#[test]
+fn auto_columns_and_part_padding() {
+    let json = r##"{
+      "version": "0.1",
+      "root": "doc",
+      "elements": {
+        "doc": { "type": "Document", "children": ["t"] },
+        "t": {
+          "type": "Table",
+          "props": { "rows": [["", "基本信息"]], "widths": ["5.65pt", "auto"], "look": { "firstRow": false, "firstColumn": true } },
+          "style": { "fontSize": 10 },
+          "parts": { "lastColumn": { "paddingLeft": 12, "paddingRight": 18 } }
+        }
+      }
+    }"##;
+    let json = json.replace(
+        r#""firstColumn": true }"#,
+        r#""firstColumn": true, "lastColumn": true }"#,
+    );
+    let out = fmtagno::render_str(&json, Format::Docx, None).unwrap();
+    let b = &out.bytes;
+    // 1460 = 4 个全角字 × 10pt + 左右 padding 12 + 18 + 3pt 余量
+    assert!(has(
+        b,
+        r#"<w:gridCol w:w="113" w:type="dxa" /><w:gridCol w:w="1460""#
+    ));
+    assert!(has(b, r#"<w:tcW w:w="0" w:type="auto""#));
+    assert!(has(b, r#"<w:tblLayout w:type="autofit""#));
+    assert!(has(b, r#"<w:left w:w="240" w:type="dxa""#));
+    assert!(has(b, r#"<w:right w:w="360" w:type="dxa""#));
+    assert!(
+        has(b, r#"<w:tblW w:w="0" w:type="auto""#),
+        "auto 表格不该撑满版心"
+    );
+}

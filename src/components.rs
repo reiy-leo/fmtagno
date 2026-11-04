@@ -39,6 +39,15 @@ pub struct Run {
     pub kind: Option<RunKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub href: Option<String>,
+    /// 行内图片：本地路径或网址，写了就不显示 text
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// 行内图片的宽，pt；只写宽或高时按比例算另一边
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f32>,
+    /// 行内图片的高，pt
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f32>,
     /// 常用文字样式的简写
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bold: Option<bool>,
@@ -65,6 +74,9 @@ impl Run {
             field: None,
             kind: None,
             href: None,
+            image: None,
+            width: None,
+            height: None,
             bold: None,
             italic: None,
             underline: None,
@@ -94,6 +106,12 @@ pub enum Inline {
 pub enum RunOrText {
     Text(String),
     Run(Run),
+}
+
+impl Default for Inline {
+    fn default() -> Self {
+        Inline::Plain(String::new())
+    }
 }
 
 impl Inline {
@@ -278,13 +296,168 @@ impl Default for TableLook {
 pub struct TableProps {
     /// 表头；有表头时它就是 firstRow
     #[serde(default)]
-    pub columns: Vec<Inline>,
-    pub rows: Vec<Vec<Inline>>,
-    /// 各列宽度的比例
+    pub columns: Vec<Cell>,
+    /// 每行只写从这一行开始的格子，被上面的格子 rowSpan 占掉的位置不写（同 HTML）
+    pub rows: Vec<Vec<Cell>>,
+    /// 各列宽度：数字是比例，分掉固定列和 auto 列剩下的宽度；
+    /// 带单位的字符串是固定宽度（"5.65pt"、"20mm"）；"auto" 按内容撑开。
+    /// 没有比例列时表格不撑满，宽度等于各列相加。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub widths: Option<Vec<f32>>,
+    pub widths: Option<Vec<crate::style::ColWidth>>,
     #[serde(default)]
     pub look: TableLook,
+    /// 各行高度，按行算（有表头时表头是第一项）：长度是最小高度，
+    /// `{"height": "20pt", "rule": "exact"}` 是固定高度，null 不限
+    #[serde(
+        rename = "rowHeights",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub row_heights: Option<Vec<Option<RowHeight>>>,
+}
+
+/// 表格的一格：文字（字符串或 runs），或写成对象带上合并和单格样式。
+// 一张表格的格子不多，不值得为大小差异装箱
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Cell {
+    Text(Inline),
+    Full(CellObj),
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CellObj {
+    /// 文字：字符串，或 run 数组；也可以写成 runs
+    #[serde(default, alias = "runs")]
+    pub text: Inline,
+    /// 往下合并几行（含自己），默认 1
+    #[serde(rename = "rowSpan", default, skip_serializing_if = "Option::is_none")]
+    pub row_span: Option<u32>,
+    /// 往右合并几列（含自己），默认 1
+    #[serde(rename = "colSpan", default, skip_serializing_if = "Option::is_none")]
+    pub col_span: Option<u32>,
+    /// 只给这一格的样式：样式名、样式名数组或样式对象，叠在部位样式之后
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<Value>")]
+    pub style: Option<Value>,
+    /// 算好的样式，渲染器用它，不从 JSON 读
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub computed: Style,
+}
+
+impl Cell {
+    pub fn text(&self) -> &Inline {
+        match self {
+            Cell::Text(t) => t,
+            Cell::Full(c) => &c.text,
+        }
+    }
+
+    pub fn text_mut(&mut self) -> &mut Inline {
+        match self {
+            Cell::Text(t) => t,
+            Cell::Full(c) => &mut c.text,
+        }
+    }
+
+    pub fn row_span(&self) -> usize {
+        match self {
+            Cell::Full(c) => c.row_span.unwrap_or(1).max(1) as usize,
+            Cell::Text(_) => 1,
+        }
+    }
+
+    pub fn col_span(&self) -> usize {
+        match self {
+            Cell::Full(c) => c.col_span.unwrap_or(1).max(1) as usize,
+            Cell::Text(_) => 1,
+        }
+    }
+
+    /// 单格样式（算好的），没写是空样式
+    pub fn style(&self) -> Option<&Style> {
+        match self {
+            Cell::Full(c) if c.style.is_some() => Some(&c.computed),
+            _ => None,
+        }
+    }
+}
+
+/// 行高：最小高度或固定高度，pt。JSON 里写长度（最小高度），
+/// 或 `{"height": "20pt", "rule": "exact"}`。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowHeight {
+    pub height: f32,
+    pub exact: bool,
+}
+
+impl<'de> Deserialize<'de> for RowHeight {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let v = Value::deserialize(d)?;
+        let len = |v: &Value| -> Result<f32, D::Error> {
+            match crate::style::Len::from_value(v).map_err(D::Error::custom)? {
+                crate::style::Len::Pt(x) if x >= 0.0 => Ok(x),
+                _ => Err(D::Error::custom("行高要写绝对长度（如 \"20pt\"、\"8mm\"）")),
+            }
+        };
+        match &v {
+            Value::Object(m) => {
+                for k in m.keys() {
+                    if k != "height" && k != "rule" {
+                        return Err(D::Error::custom(format!("行高里没有 `{k}`")));
+                    }
+                }
+                let h = len(m
+                    .get("height")
+                    .ok_or_else(|| D::Error::custom("行高要写 height"))?)?;
+                let exact = match m.get("rule").and_then(Value::as_str) {
+                    None | Some("atLeast") => false,
+                    Some("exact") => true,
+                    Some(o) => {
+                        return Err(D::Error::custom(format!(
+                            "行高 rule 只能是 atLeast 或 exact，不是 `{o}`"
+                        )));
+                    }
+                };
+                Ok(RowHeight { height: h, exact })
+            }
+            _ => Ok(RowHeight {
+                height: len(&v)?,
+                exact: false,
+            }),
+        }
+    }
+}
+
+impl Serialize for RowHeight {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let h = format!("{}pt", self.height);
+        if self.exact {
+            serde_json::json!({"height": h, "rule": "exact"}).serialize(s)
+        } else {
+            h.serialize(s)
+        }
+    }
+}
+
+impl JsonSchema for RowHeight {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "RowHeight".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> Schema {
+        schemars::json_schema!({ "anyOf": [
+            { "type": "number" },
+            { "type": "string" },
+            { "type": "object", "properties": {
+                "height": { "anyOf": [{ "type": "number" }, { "type": "string" }] },
+                "rule": { "enum": ["atLeast", "exact"] }
+            }, "required": ["height"], "additionalProperties": false }
+        ] })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -420,9 +593,9 @@ impl Component {
             Component::Text(p) => out.push(&mut p.text),
             Component::List(p) => list(&mut p.items, &mut out),
             Component::Table(p) => {
-                out.extend(p.columns.iter_mut());
+                out.extend(p.columns.iter_mut().map(Cell::text_mut));
                 for r in &mut p.rows {
-                    out.extend(r.iter_mut());
+                    out.extend(r.iter_mut().map(Cell::text_mut));
                 }
             }
             _ => {}

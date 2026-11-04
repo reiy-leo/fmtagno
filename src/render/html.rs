@@ -13,8 +13,8 @@ use crate::{
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Caps, Edge, EmphasisMark, Len, LineHeight, MarkerGap,
-        Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap, WrapMode,
+        Align, AnchorTo, Background, Caps, ColWidth, Edge, EmphasisMark, Len, LineHeight,
+        MarkerGap, Position, Side, Strike, Style, UnderlineStyle, VerticalAlign, Wrap, WrapMode,
     },
 };
 
@@ -86,6 +86,7 @@ h1, h2, h3, h4, h5, h6, p, pre, ul, ol, figure, table { margin: 0; }
 table { border-collapse: collapse; }
 th, td { text-align: inherit; vertical-align: top; font-weight: inherit; }
 figure img { max-width: 100%; height: auto; display: block; }
+.fmtagno-inline-img { display: inline-block; vertical-align: baseline; }
 pre { white-space: pre-wrap; }
 code { font: inherit; }
 .fmtagno-list { list-style: none; padding: 0; }
@@ -131,12 +132,17 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
   .fmtagno-pagebreak { border-top: none; margin: 0; }
   .fmtagno-section + .fmtagno-section { border-top: none; margin-top: 0; padding-top: 0; }
 }
-.pagedjs_pagebox { position: relative; }
+.pagedjs_pagebox { position: relative; isolation: isolate; }
+.pagedjs_area { position: relative; }
 .fmtagno-hf-box { position: absolute; }
+/* 排版时先放在原地不占位，免得 Paged.js 以为它溢出了页面；排完再挪回坐标上 */
+.fmtagno-abs:not(.fmtagno-placed) { top: 0 !important; left: 0 !important; visibility: hidden; }
 @media print { body { background: none; } }
 </style>
 <style>
-/* Paged.js 不认空 div 上的 break-after，改成让下一个元素从新页开始 */
+/* Paged.js 不认空 div 上的 break-after，改成让下一个元素从新页开始；
+   空 div 自己的 break-after 去掉，不然有时会和下一个元素的 break-before 叠成两次分页，多出空白页 */
+.fmtagno-pagebreak { break-after: auto; }
 .fmtagno-pagebreak + * { break-before: page; }
 </style>
 ";
@@ -192,6 +198,17 @@ const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
         }
       }
       fill(x.p.element, x);
+    }
+    // 绝对定位的图挪到它所在页的纸面（anchorTo: page）或版心（margin）上，用原来写的坐标
+    for (const x of info) {
+      const box = x.p.element.querySelector('.pagedjs_pagebox');
+      const area = x.p.element.querySelector('.pagedjs_area');
+      for (const f of x.p.element.querySelectorAll('.fmtagno-abs')) {
+        const to = f.dataset.anchor === 'page' ? box : area;
+        if (!to) continue;
+        f.classList.add('fmtagno-placed');
+        to.appendChild(f);
+      }
     }
     // 排完的标记，截图、打印脚本可以等它
     document.documentElement.dataset.fmtagnoReady = '1';
@@ -485,10 +502,16 @@ impl Html<'_> {
         ts.border_left = None;
         ts.padding = None;
         let mut css = self.css(&ts, parent, &n.id, Ctx::Table);
-        if s.width.is_none() {
+        let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let has_auto = ws.contains(&ColWidth::Auto);
+        if s.width.is_none() && common::fills_width(&ws) {
             css.push_str("width:100%;");
         }
-        let layout = s.table_layout.map(|l| l.as_str()).unwrap_or("fixed");
+        // 有 auto 列时用自动布局，浏览器才会按内容撑开
+        let layout =
+            s.table_layout
+                .map(|l| l.as_str())
+                .unwrap_or(if has_auto { "auto" } else { "fixed" });
         let _ = write!(css, "table-layout:{layout};");
         let _ = writeln!(
             self.out,
@@ -496,61 +519,74 @@ impl Html<'_> {
             esc(&n.id),
             esc(&css)
         );
-        if let Some(w) = &p.widths {
-            let total: f32 = w.iter().sum();
-            if total > 0.0 && w.len() == g.cols {
-                self.out.push_str("<colgroup>");
-                for x in w {
-                    let _ = write!(self.out, "<col style=\"width:{:.2}%\">", x / total * 100.0);
+        if p.widths.is_some() {
+            let fixed: f32 = ws
+                .iter()
+                .map(|w| if let ColWidth::Fixed(x) = w { *x } else { 0.0 })
+                .sum();
+            let ratio: f32 = ws
+                .iter()
+                .map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 })
+                .sum();
+            self.out.push_str("<colgroup>");
+            for w in &ws {
+                match w {
+                    ColWidth::Fixed(x) => {
+                        let _ = write!(self.out, "<col style=\"width:{x}pt\">");
+                    }
+                    ColWidth::Ratio(x) if fixed > 0.0 || has_auto => {
+                        let _ = write!(
+                            self.out,
+                            "<col style=\"width:calc((100% - {fixed}pt) * {:.4})\">",
+                            x / ratio
+                        );
+                    }
+                    ColWidth::Ratio(x) => {
+                        let _ = write!(self.out, "<col style=\"width:{:.2}%\">", x / ratio * 100.0);
+                    }
+                    ColWidth::Auto => self.out.push_str("<col>"),
                 }
-                self.out.push_str("</colgroup>\n");
-            } else {
-                self.warn.push(format!(
-                    "表格 `{}` 的 widths 个数和列数对不上，改成平均分",
-                    n.id
-                ));
             }
+            self.out.push_str("</colgroup>\n");
         }
         let pad = s
             .cell_padding
             .map(|x| x.pt(s.size_pt(), 0.0))
             .unwrap_or(4.0);
-        let empty = Inline::Plain(String::new());
         let head_sep = g.has_header && s.repeat_header.unwrap_or(true);
+        g.warn_ragged(&mut self.warn, &n.id);
         if !head_sep {
             self.out.push_str("<tbody>\n");
         }
         for r in 0..g.rows {
-            let (cells, header): (&[Inline], bool) = if g.has_header && r == 0 {
-                (&p.columns, true)
-            } else {
-                let i = r - usize::from(g.has_header);
-                if p.rows[i].len() != g.cols {
-                    self.warn.push(format!(
-                        "表格 `{}` 第 {} 行有 {} 格，按 {} 列补齐",
-                        n.id,
-                        i + 1,
-                        p.rows[i].len(),
-                        g.cols
-                    ));
-                }
-                (&p.rows[i], false)
-            };
+            let header = g.has_header && r == 0;
             if head_sep && r == 0 {
                 self.out.push_str("<thead>");
             }
-            let tr = if s.row_break == Some(false) {
-                " style=\"break-inside:avoid\""
+            let mut tr = String::new();
+            if s.row_break == Some(false) {
+                tr.push_str("break-inside:avoid;");
+            }
+            if let Some(h) = g.row_height(p, r) {
+                let _ = write!(tr, "height:{}pt;", h.height);
+            }
+            if tr.is_empty() {
+                self.out.push_str("<tr>");
             } else {
-                ""
-            };
-            let _ = write!(self.out, "<tr{tr}>");
+                let _ = write!(self.out, "<tr style=\"{tr}\">");
+            }
             for c in 0..g.cols {
+                if !g.is_origin(r, c) {
+                    continue;
+                }
+                let sl = *g.slot(r, c);
                 let part = common::cell_parts(n, &p.look, &g, r, c);
                 let mut cs = s.inherited();
                 cs.merge(&part);
-                let mut css = self.css(&part, Some(s), &n.id, Ctx::Cell);
-                let borders = common::cell_edges(n, &p.look, &g, r, c);
+                // 先写表格的 cellPadding，部位上写的 padding 跟在后面盖掉对应的边
+                let mut css = format!("padding:{pad}pt;");
+                css.push_str(&self.css(&part, Some(s), &n.id, Ctx::Cell));
+                let borders = common::span_edges(n, &p.look, &g, r, c);
                 for (e, b) in ["top", "right", "bottom", "left"]
                     .iter()
                     .zip(borders.iter())
@@ -559,17 +595,19 @@ impl Html<'_> {
                         let _ = write!(css, "border-{e}:{};", b.css());
                     }
                 }
-                if Edge::ALL.iter().all(|e| part.padding_side(*e).is_none()) {
-                    let _ = write!(css, "padding:{pad}pt;");
-                }
                 let tag = if header { "th" } else { "td" };
-                let a = if css.is_empty() {
-                    String::new()
-                } else {
-                    format!(" style=\"{}\"", esc(&css))
-                };
+                let mut a = String::new();
+                if sl.row_span > 1 {
+                    let _ = write!(a, " rowspan=\"{}\"", sl.row_span);
+                }
+                if sl.col_span > 1 {
+                    let _ = write!(a, " colspan=\"{}\"", sl.col_span);
+                }
+                if !css.is_empty() {
+                    let _ = write!(a, " style=\"{}\"", esc(&css));
+                }
                 let _ = write!(self.out, "<{tag}{a}>");
-                self.inline_in(cells.get(c).unwrap_or(&empty), s, &cs, &n.id);
+                self.inline_in(sl.text(), s, &cs, &n.id);
                 let _ = write!(self.out, "</{tag}>");
             }
             self.out.push_str("</tr>\n");
@@ -637,6 +675,12 @@ impl Html<'_> {
                 }
             }
         }
+        // 相对页面或版心定位的图：--paged 时由 PAGED_ABS 挪到所在页上再按坐标放
+        let page_abs = match (s.position, s.anchor_to) {
+            (Some(Position::Absolute), Some(AnchorTo::Page)) => Some("page"),
+            (Some(Position::Absolute), Some(AnchorTo::Margin) | None) => Some("margin"),
+            _ => None,
+        };
         let mut img = String::new();
         if let Some(w) = s.width {
             let _ = write!(img, "width:{};", len_css(w));
@@ -663,8 +707,11 @@ impl Html<'_> {
         let src = self.image_src(&n.id, &p.src);
         let _ = write!(
             self.out,
-            "<figure id=\"{}\" style=\"{}\"><img src=\"{}\" alt=\"{}\" style=\"{}\">",
+            "<figure id=\"{}\"{} style=\"{}\"><img src=\"{}\" alt=\"{}\" style=\"{}\">",
             esc(&n.id),
+            page_abs
+                .map(|a| format!(" class=\"fmtagno-abs\" data-anchor=\"{a}\""))
+                .unwrap_or_default(),
             esc(&css),
             esc(&src),
             esc(&p.alt),
@@ -727,7 +774,21 @@ impl Html<'_> {
             let _ = write!(css, "background-color:{};", h.css());
         }
         let mut text = esc(&r.text).replace('\n', "<br>");
-        if let Some(f) = r.field {
+        if let Some(src) = &r.image {
+            let mut st = String::new();
+            if let Some(w) = r.width {
+                let _ = write!(st, "width:{w}pt;");
+            }
+            if let Some(h) = r.height {
+                let _ = write!(st, "height:{h}pt;");
+            }
+            let src = self.image_src(id, src);
+            text = format!(
+                "<img class=\"fmtagno-inline-img\" src=\"{}\" alt=\"{}\" style=\"{st}\">",
+                esc(&src),
+                esc(&r.text)
+            );
+        } else if let Some(f) = r.field {
             let k = match f {
                 Field::Page => "page",
                 Field::Pages => "pages",

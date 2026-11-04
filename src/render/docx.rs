@@ -1,32 +1,31 @@
 //! docx 渲染器，基于 docx-rs。样式按算好的结果直接写在段落和 run 上（直接格式）；
 //! 标题、代码另外挂上同名的 Word 样式，方便在 Word 里找和改。
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use docx_rs::{
     AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, DrawingPosition, FieldCharType,
-    Footer, Header, Hyperlink, HyperlinkType, IndentLevel, InstrNUMPAGES, InstrPAGE, InstrText,
-    Level, LevelJc, LevelSuffixType, LevelText, LineSpacing, LineSpacingType, NumberFormat,
-    Numbering, NumberingId, PageMargin, PageNumType, PageOrientationType, Paragraph,
+    Footer, Header, HeightRule, Hyperlink, HyperlinkType, IndentLevel, InstrNUMPAGES, InstrPAGE,
+    InstrText, Level, LevelJc, LevelSuffixType, LevelText, LineSpacing, LineSpacingType,
+    NumberFormat, Numbering, NumberingId, PageMargin, PageNumType, PageOrientationType, Paragraph,
     ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, PicAlign, RelativeFromHType,
     RelativeFromVType, Run, RunFonts, Shading, ShdType, SpecialIndentType, Start, Style, StyleType,
     Table, TableCell, TableCellBorder, TableCellBorderPosition, TableCellBorders, TableCellMargins,
-    TableLayoutType, TableRow, TextDirectionType, VAlignType, VertAlignType, WidthType,
+    TableLayoutType, TableRow, TextDirectionType, VAlignType, VMergeType, VertAlignType, WidthType,
 };
 
 use crate::{
     assets,
-    components::{
-        CodeProps, Component, Field, ImageProps, Inline, ListProps, Run as PRun, TableProps,
-    },
+    components::{CodeProps, Component, Field, ImageProps, ListProps, Run as PRun, TableProps},
     doc::{Doc, Node, Page, SectionLayout},
     render::{
         Options, Output,
         common::{self, Grid, Warn},
     },
     style::{
-        Align, AnchorTo, Background, Border, BorderStyle, Caps, Edge, HAlign, Len, LineHeight,
-        ListStyleType, MarkerGap, Position, Side, Strike, Style as PStyle, TableLayout,
+        Align, AnchorTo, Background, Border, BorderStyle, Caps, ColWidth, Edge, HAlign, Len,
+        LineHeight, ListStyleType, MarkerGap, Position, Side, Strike, Style as PStyle, TableLayout,
         UnderlineStyle, VerticalAlign, Wrap, WrapMode,
     },
     units,
@@ -185,6 +184,16 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
     let mut xml = docx.build();
     xml.document = mark_table_headers(&xml.document, &r.repeat_heads);
     xml.document = fix_sections(&xml.document, &cols);
+    xml.document = mark_behind(&xml.document);
+    for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
+        *h = mark_behind(h);
+    }
+    fix_part_rels(
+        &xml.headers,
+        &mut xml.header_rels,
+        &xml.footers,
+        &mut xml.footer_rels,
+    );
     let mut buf = std::io::Cursor::new(Vec::new());
     xml.pack(&mut buf)?;
     Ok(Output {
@@ -220,6 +229,56 @@ struct HeaderSet {
 
 /// 占位节的纸张边长（twip），用来在 XML 里认出占位节。
 const DUMMY_PAGE: u32 = 1;
+
+/// docx-rs 只按三个固定位置给页眉页脚挂图片关系，页眉页脚多了（每节一个、加占位节）
+/// 图片就挂错文件，Word 里不显示。这里按每个页眉页脚里实际引用的 r:embed / r:id 重排关系。
+fn fix_part_rels(
+    headers: &[Vec<u8>],
+    header_rels: &mut Vec<Vec<u8>>,
+    footers: &[Vec<u8>],
+    footer_rels: &mut Vec<Vec<u8>>,
+) {
+    let mut all: BTreeMap<String, String> = BTreeMap::new();
+    for r in header_rels.iter().chain(footer_rels.iter()) {
+        let r = String::from_utf8_lossy(r);
+        for part in r.split("<Relationship ").skip(1) {
+            let Some(end) = part.find("/>") else { continue };
+            let el = format!("<Relationship {}/>", &part[..end]);
+            if let Some(id) = attr(&el, "Id") {
+                all.insert(id, el);
+            }
+        }
+    }
+    if all.is_empty() {
+        return;
+    }
+    let rebuild = |parts: &[Vec<u8>], rels: &mut Vec<Vec<u8>>| {
+        rels.resize(parts.len().max(rels.len()), Vec::new());
+        for (i, p) in parts.iter().enumerate() {
+            let p = String::from_utf8_lossy(p);
+            let mut out = String::from(
+                r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+            );
+            for (id, el) in &all {
+                if p.contains(&format!("r:embed=\"{id}\"")) || p.contains(&format!("r:id=\"{id}\""))
+                {
+                    out.push_str(el);
+                }
+            }
+            out.push_str("</Relationships>");
+            rels[i] = out.into_bytes();
+        }
+    };
+    rebuild(headers, header_rels);
+    rebuild(footers, footer_rels);
+}
+
+fn attr(el: &str, name: &str) -> Option<String> {
+    let k = format!(" {name}=\"");
+    let i = el.find(&k)? + k.len();
+    let j = el[i..].find('"')?;
+    Some(el[i..i + j].to_string())
+}
 
 /// 收拾 docx-rs 生成的分节：
 /// 1. 把占位节（纸张 1×1）上的页眉页脚引用挪到它前面那个真正的节上，删掉占位节的段落；
@@ -347,6 +406,33 @@ fn elements(body: &str) -> Vec<String> {
 
 /// 给要重复的表头行补上 `<w:tblHeader />`：Word 跨页时会在新页顶上再画一遍这一行。
 /// `heads` 和文档里 `<w:tbl>` 出现的顺序一一对应（表格不嵌套）。
+/// 衬于文字下方的图片在 relativeHeight 上的记号，见 `mark_behind`。
+const BEHIND_MARK: u32 = 190_499;
+
+/// 把带记号的浮动图片改成衬于文字下方（behindDoc="1"）。
+fn mark_behind(xml: &[u8]) -> Vec<u8> {
+    let s = String::from_utf8_lossy(xml);
+    let mark = format!("relativeHeight=\"{BEHIND_MARK}\"");
+    if !s.contains(&mark) {
+        return xml.to_vec();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest: &str = &s;
+    while let Some(i) = rest.find("<wp:anchor ") {
+        let end = rest[i..].find('>').map(|e| i + e).unwrap_or(rest.len());
+        let tag = &rest[i..end];
+        out.push_str(&rest[..i]);
+        if tag.contains(&mark) {
+            out.push_str(&tag.replace("behindDoc=\"0\"", "behindDoc=\"1\""));
+        } else {
+            out.push_str(tag);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out.into_bytes()
+}
+
 fn mark_table_headers(doc: &[u8], heads: &[bool]) -> Vec<u8> {
     if !heads.contains(&true) {
         return doc.to_vec();
@@ -659,48 +745,78 @@ impl Ctx<'_> {
             Some(w) => w.abs_pt(),
             None => self.content_width_pt,
         };
-        let total = units::twip(width_pt) as f32;
-        let even = vec![(total / g.cols as f32) as usize; g.cols];
-        let grid: Vec<usize> = match &p.widths {
-            Some(ws) if ws.len() == g.cols && ws.iter().sum::<f32>() > 0.0 => {
-                let sum: f32 = ws.iter().sum();
-                ws.iter().map(|x| (total * x / sum) as usize).collect()
-            }
-            Some(_) => {
-                self.warn.push(format!(
-                    "表格 `{}` 的 widths 个数和列数对不上，改成平均分",
-                    n.id
-                ));
-                even
-            }
-            None => even,
+        let pad_pt = s
+            .cell_padding
+            .map(|x| x.pt(s.size_pt(), 0.0))
+            .unwrap_or(4.0);
+        let pad = units::twip(pad_pt);
+        let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let fills = common::fills_width(&ws);
+        // auto 列按最宽的格子估一个初始宽度，Word 打开时按 autofit 自己再排
+        let auto_pt: Vec<f32> = (0..g.cols)
+            .map(|c| {
+                if ws[c] != ColWidth::Auto {
+                    return 0.0;
+                }
+                (0..g.rows)
+                    .filter(|r| g.is_origin(*r, c) && g.slot(*r, c).col_span == 1)
+                    .map(|r| {
+                        let part = common::cell_parts(n, &p.look, &g, r, c);
+                        let mut cs = s.inherited();
+                        cs.merge(&part);
+                        let side = |e| part.padding_side(e).unwrap_or(pad_pt);
+                        common::estimate_text_width(g.slot(r, c).text(), &cs)
+                            + side(Edge::Left)
+                            + side(Edge::Right)
+                            + 3.0
+                    })
+                    .fold(0.0, f32::max)
+            })
+            .collect();
+        let fixed_sum: f32 = ws
+            .iter()
+            .zip(&auto_pt)
+            .map(|(w, a)| match w {
+                ColWidth::Fixed(x) => *x,
+                ColWidth::Auto => *a,
+                ColWidth::Ratio(_) => 0.0,
+            })
+            .sum();
+        let ratio_sum: f32 = ws
+            .iter()
+            .map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 })
+            .sum();
+        let rest = (width_pt - fixed_sum).max(0.0);
+        let grid_pt: Vec<f32> = ws
+            .iter()
+            .zip(&auto_pt)
+            .map(|(w, a)| match w {
+                ColWidth::Fixed(x) => *x,
+                ColWidth::Auto => *a,
+                ColWidth::Ratio(x) => rest * x / ratio_sum,
+            })
+            .collect();
+        let grid: Vec<usize> = grid_pt.iter().map(|x| units::twip(*x) as usize).collect();
+        let total: usize = if fills || s.width.is_some() {
+            units::twip(width_pt) as usize
+        } else {
+            grid.iter().sum()
         };
-        let pad = units::twip(
-            s.cell_padding
-                .map(|x| x.pt(s.size_pt(), 0.0))
-                .unwrap_or(4.0),
-        );
-        let empty = Inline::Plain(String::new());
+        g.warn_ragged(&mut self.warn, &n.id);
         let mut rows = Vec::new();
         for r in 0..g.rows {
-            let cells: &[Inline] = if g.has_header && r == 0 {
-                &p.columns
-            } else {
-                let i = r - usize::from(g.has_header);
-                if p.rows[i].len() != g.cols {
-                    self.warn.push(format!(
-                        "表格 `{}` 第 {} 行有 {} 格，按 {} 列补齐",
-                        n.id,
-                        i + 1,
-                        p.rows[i].len(),
-                        g.cols
-                    ));
-                }
-                &p.rows[i]
-            };
             let mut tcs = Vec::new();
-            for (c, width) in grid.iter().enumerate() {
-                let part = common::cell_parts(n, &p.look, &g, r, c);
+            for c in 0..g.cols {
+                let sl = *g.slot(r, c);
+                let (r0, c0) = sl.origin;
+                // 横向被合并掉的位置不写；纵向合并在下面几行写 vMerge continue 的格子
+                if c0 != c {
+                    continue;
+                }
+                let cont = r0 != r;
+                let width: usize = grid[c..c + sl.col_span].iter().sum();
+                let width = &width;
+                let part = common::cell_parts(n, &p.look, &g, r0, c0);
                 let mut cs = s.inherited();
                 cs.merge(&part);
                 let mut ps = cs.clone();
@@ -716,22 +832,49 @@ impl Ctx<'_> {
                 ps.space_before = part.space_before;
                 ps.space_after = part.space_after;
                 let para = self.para(Paragraph::new(), &ps, &n.id);
-                let runs = common::rebase_runs(cells.get(c).unwrap_or(&empty), s, &cs);
-                let para = self.inline(para, runs, &n.id);
-                let mut cell = TableCell::new()
-                    .add_paragraph(para)
-                    .width(*width, WidthType::Dxa);
+                let para = if cont {
+                    para
+                } else {
+                    let runs = common::rebase_runs(sl.text(), s, &cs);
+                    self.inline(para, runs, &n.id)
+                };
+                let mut cell = TableCell::new().add_paragraph(para);
+                if sl.col_span > 1 {
+                    cell = cell.grid_span(sl.col_span);
+                }
+                if sl.row_span > 1 {
+                    cell = cell.vertical_merge(if cont {
+                        VMergeType::Continue
+                    } else {
+                        VMergeType::Restart
+                    });
+                }
+                cell = if sl.col_span == 1 && ws[c] == ColWidth::Auto {
+                    cell.width(0, WidthType::Auto)
+                } else {
+                    cell.width(*width, WidthType::Dxa)
+                };
                 if let Some(bg) = &part.background {
                     cell = cell.shading(shading(bg));
                 }
                 // 两格之间的线只写一次：上下之间写在上面一格的下边，左右之间写在左边一格的右边。
                 // 两边都写的话 Word 会画两条（双线尤其明显）。
+                // 合并格：上下边只在第一行、最后一行写，右边取最后一列
+                let last_row = r == r0 + sl.row_span - 1;
+                let cr = c + sl.col_span - 1;
                 let mut b = common::cell_edges(n, &p.look, &g, r, c);
-                if r + 1 < g.rows {
+                b[1] = common::cell_edges(n, &p.look, &g, r, cr)[1].clone();
+                if r + 1 < g.rows && last_row {
                     b[2] = common::cell_edges(n, &p.look, &g, r + 1, c)[0].clone();
                 }
-                if c + 1 < g.cols {
-                    b[1] = common::cell_edges(n, &p.look, &g, r, c + 1)[3].clone();
+                if !last_row {
+                    b[2] = None;
+                }
+                if cont {
+                    b[0] = None;
+                }
+                if cr + 1 < g.cols {
+                    b[1] = common::cell_edges(n, &p.look, &g, r, cr + 1)[3].clone();
                 }
                 let mut borders = TableCellBorders::with_empty();
                 for (i, (pos, b)) in [
@@ -764,15 +907,33 @@ impl Ctx<'_> {
                         _ => TextDirectionType::Lr,
                     });
                 }
-                if Edge::ALL.iter().any(|e| part.padding_side(*e).is_some()) {
-                    self.warn
-                        .unsupported(FORMAT, "单个格子的 padding（用 cellPadding）", &n.id);
+                // 部位上写的 padding 落成这一格的 w:tcMar，没写的边沿用表格的 cellPadding
+                for e in Edge::ALL {
+                    if let Some(v) = part.padding_side(e) {
+                        let v = units::twip(v) as usize;
+                        let pr = cell.property;
+                        cell.property = match e {
+                            Edge::Top => pr.margin_top(v, WidthType::Dxa),
+                            Edge::Right => pr.margin_right(v, WidthType::Dxa),
+                            Edge::Bottom => pr.margin_bottom(v, WidthType::Dxa),
+                            Edge::Left => pr.margin_left(v, WidthType::Dxa),
+                        };
+                    }
                 }
                 tcs.push(cell);
             }
             let mut row = TableRow::new(tcs);
             if s.row_break == Some(false) {
                 row = row.cant_split();
+            }
+            if let Some(h) = g.row_height(p, r) {
+                row = row
+                    .row_height(units::twip(h.height) as f32)
+                    .height_rule(if h.exact {
+                        HeightRule::Exact
+                    } else {
+                        HeightRule::AtLeast
+                    });
             }
             rows.push(row);
         }
@@ -783,7 +944,10 @@ impl Ctx<'_> {
             .set_grid(grid)
             .layout(match s.table_layout {
                 Some(TableLayout::Auto) => TableLayoutType::Autofit,
-                _ => TableLayoutType::Fixed,
+                Some(TableLayout::Fixed) => TableLayoutType::Fixed,
+                // 有 auto 列时让 Word 按内容排
+                None if ws.contains(&ColWidth::Auto) => TableLayoutType::Autofit,
+                None => TableLayoutType::Fixed,
             })
             .margins(TableCellMargins::new().margin(
                 pad as usize,
@@ -791,7 +955,15 @@ impl Ctx<'_> {
                 pad as usize,
                 pad as usize,
             ))
-            .width(total as usize, WidthType::Dxa);
+            // 按内容收窄的表格 tblW 写 auto，不然 Word 会被这个总宽卡住，auto 列撑不开
+            .width(
+                if fills || s.width.is_some() { total } else { 0 },
+                if fills || s.width.is_some() {
+                    WidthType::Dxa
+                } else {
+                    WidthType::Auto
+                },
+            );
         if s.page_break_before == Some(true) {
             self.page_break();
         }
@@ -848,7 +1020,8 @@ impl Ctx<'_> {
             (None, Some(h)) => (h * pw / ph, h),
             (None, None) => (pw, ph),
         };
-        if w > self.content_width_pt {
+        // 绝对定位的图片（比如整页背景）可以比版心宽，不缩
+        if w > self.content_width_pt && s.position != Some(Position::Absolute) {
             h *= self.content_width_pt / w;
             w = self.content_width_pt;
         }
@@ -912,8 +1085,16 @@ impl Ctx<'_> {
             }
         }
         if matches!(s.wrap, Some(Wrap::Image(WrapMode::Behind))) {
-            self.warn
-                .unsupported(FORMAT, "wrap: behind（按 inFront 处理）", &n.id);
+            if s.position.unwrap_or(Position::Inline) == Position::Inline {
+                self.warn.unsupported(
+                    FORMAT,
+                    "wrap: behind（只对浮动、绝对定位的图片有效）",
+                    &n.id,
+                );
+            } else {
+                // docx-rs 把 behindDoc 写死成 0：用 relativeHeight 做记号，生成 XML 后再改
+                pic = pic.relative_height(BEHIND_MARK);
+            }
         }
         for (f, on) in [
             ("opacity", s.opacity.is_some()),
@@ -985,8 +1166,12 @@ impl Ctx<'_> {
             None => {}
         }
         match s.line_height {
+            // 倍数按 CSS 理解：字号 × 倍数。Word 的 auto 是乘字体自己的单倍行高
+            // （雅黑约 1.32 倍字号），会比 HTML、PDF 高出三四成，所以换成「至少」。
             Some(LineHeight::Multiple(x)) => {
-                ls = ls.line((x * 240.0) as i32).line_rule(LineSpacingType::Auto);
+                ls = ls
+                    .line(units::twip(fs * x))
+                    .line_rule(LineSpacingType::AtLeast);
                 any = true;
             }
             Some(LineHeight::Exact(l)) => {
@@ -1088,6 +1273,12 @@ impl Ctx<'_> {
                 continue;
             }
             let mut run = Run::new();
+            if let Some(src) = &r.image {
+                if let Some(pic) = self.inline_pic(id, src, r.width, r.height) {
+                    p = p.add_run(Run::new().add_image(pic));
+                }
+                continue;
+            }
             if let Some(f) = r.field {
                 let instr = match f {
                     Field::Page => InstrText::PAGE(InstrPAGE::new()),
@@ -1125,6 +1316,34 @@ impl Ctx<'_> {
             };
         }
         p
+    }
+
+    /// 行内图片（runs 里的 image）：按写的宽高，只写一边时按比例。
+    fn inline_pic(&mut self, id: &str, src: &str, w: Option<f32>, h: Option<f32>) -> Option<Pic> {
+        let asset = if assets::is_remote(src) {
+            Err("docx 暂不支持远程图片".to_string())
+        } else {
+            assets::load(src, self.opts.base_dir.as_deref()).map_err(|e| format!("{e:#}"))
+        };
+        let got = asset.and_then(|a| match image::load_from_memory(&a.bytes) {
+            Ok(img) => Ok((a, img.width() as f32 * 0.75, img.height() as f32 * 0.75)),
+            Err(_) => Err(format!("{} 格式放不进 docx", a.mime)),
+        });
+        let (a, pw, ph) = match got {
+            Ok(x) => x,
+            Err(why) => {
+                self.warn
+                    .push(format!("`{id}` 里的行内图片 `{src}`：{why}"));
+                return None;
+            }
+        };
+        let (w, h) = match (w, h) {
+            (Some(w), Some(h)) => (w, h),
+            (Some(w), None) => (w, w * ph / pw),
+            (None, Some(h)) => (h * pw / ph, h),
+            (None, None) => (pw, ph),
+        };
+        Some(Pic::new(&a.bytes).size(units::emu(w), units::emu(h)))
     }
 
     /// 文字属性。
