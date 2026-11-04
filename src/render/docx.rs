@@ -5,14 +5,13 @@ use std::str::FromStr;
 
 use docx_rs::{
     AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, DrawingPosition, FieldCharType,
-    Footer, Header, Hyperlink, HyperlinkType, IndentLevel, InstrNUMPAGES, InstrPAGE, InstrText,
-    Level, LevelJc, LevelSuffixType, LevelText, LineSpacing, LineSpacingType, NumberFormat,
-    Numbering, NumberingId, PageMargin, PageNumType, PageOrientationType, Paragraph,
+    Footer, Header, HeightRule, Hyperlink, HyperlinkType, IndentLevel, InstrNUMPAGES, InstrPAGE,
+    InstrText, Level, LevelJc, LevelSuffixType, LevelText, LineSpacing, LineSpacingType,
+    NumberFormat, Numbering, NumberingId, PageMargin, PageNumType, PageOrientationType, Paragraph,
     ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, PicAlign, RelativeFromHType,
     RelativeFromVType, Run, RunFonts, Shading, ShdType, SpecialIndentType, Start, Style, StyleType,
     Table, TableCell, TableCellBorder, TableCellBorderPosition, TableCellBorders, TableCellMargins,
     TableLayoutType, TableRow, TextDirectionType, VAlignType, VMergeType, VertAlignType, WidthType,
-    HeightRule,
 };
 
 use crate::{
@@ -873,11 +872,13 @@ impl Ctx<'_> {
                 row = row.cant_split();
             }
             if let Some(h) = g.row_height(p, r) {
-                row = row.row_height(units::twip(h.height) as f32).height_rule(if h.exact {
-                    HeightRule::Exact
-                } else {
-                    HeightRule::AtLeast
-                });
+                row = row
+                    .row_height(units::twip(h.height) as f32)
+                    .height_rule(if h.exact {
+                        HeightRule::Exact
+                    } else {
+                        HeightRule::AtLeast
+                    });
             }
             rows.push(row);
         }
@@ -1276,7 +1277,8 @@ impl Ctx<'_> {
         let (a, pw, ph) = match got {
             Ok(x) => x,
             Err(why) => {
-                self.warn.push(format!("`{id}` 里的行内图片 `{src}`：{why}"));
+                self.warn
+                    .push(format!("`{id}` 里的行内图片 `{src}`：{why}"));
                 return None;
             }
         };

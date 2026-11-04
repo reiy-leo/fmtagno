@@ -308,7 +308,11 @@ pub struct TableProps {
     pub look: TableLook,
     /// 各行高度，按行算（有表头时表头是第一项）：长度是最小高度，
     /// `{"height": "20pt", "rule": "exact"}` 是固定高度，null 不限
-    #[serde(rename = "rowHeights", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "rowHeights",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub row_heights: Option<Vec<Option<RowHeight>>>,
 }
 
@@ -406,7 +410,9 @@ impl<'de> Deserialize<'de> for RowHeight {
                         return Err(D::Error::custom(format!("行高里没有 `{k}`")));
                     }
                 }
-                let h = len(m.get("height").ok_or_else(|| D::Error::custom("行高要写 height"))?)?;
+                let h = len(m
+                    .get("height")
+                    .ok_or_else(|| D::Error::custom("行高要写 height"))?)?;
                 let exact = match m.get("rule").and_then(Value::as_str) {
                     None | Some("atLeast") => false,
                     Some("exact") => true,
@@ -418,7 +424,10 @@ impl<'de> Deserialize<'de> for RowHeight {
                 };
                 Ok(RowHeight { height: h, exact })
             }
-            _ => Ok(RowHeight { height: len(&v)?, exact: false }),
+            _ => Ok(RowHeight {
+                height: len(&v)?,
+                exact: false,
+            }),
         }
     }
 }

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    components::{Cell, Inline, ListItem, Run, RowHeight, TableLook, TableProps},
+    components::{Cell, Inline, ListItem, RowHeight, Run, TableLook, TableProps},
     doc::Node,
     style::{Border, ColWidth, Edge, ListStyleType, Style},
 };
@@ -291,7 +291,9 @@ impl<'a> Grid<'a> {
 
     /// 第 r 行的行高
     pub fn row_height(&self, p: &TableProps, r: usize) -> Option<RowHeight> {
-        p.row_heights.as_ref().and_then(|v| v.get(r).copied().flatten())
+        p.row_heights
+            .as_ref()
+            .and_then(|v| v.get(r).copied().flatten())
     }
 }
 
@@ -402,7 +404,13 @@ pub fn cell_parts(n: &Node, look: &TableLook, g: &Grid, r: usize, c: usize) -> S
         }
     }
     // 单格自己写的样式最后叠；合并掉的位置用左上角那格的
-    if let Some(cs) = g.slots.get(r).and_then(|x| x.get(c)).and_then(|x| x.cell).and_then(Cell::style) {
+    if let Some(cs) = g
+        .slots
+        .get(r)
+        .and_then(|x| x.get(c))
+        .and_then(|x| x.cell)
+        .and_then(Cell::style)
+    {
         s.merge(cs);
     }
     s
