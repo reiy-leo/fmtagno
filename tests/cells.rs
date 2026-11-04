@@ -86,3 +86,41 @@ fn rejects_overlapping_spans() {
         Ok(out) => assert!(!out.warnings.is_empty()),
     }
 }
+
+/// 两节、第一节页眉留空、第二节页眉里放行内图：图片关系要挂在真正放图的那个页眉上。
+#[test]
+fn header_inline_image_gets_its_relationship() {
+    let json = r##"{
+      "version": "0.1",
+      "root": "doc",
+      "elements": {
+        "doc": { "type": "Document", "children": ["s1", "s2"] },
+        "s1": { "type": "Section", "props": { "header": null }, "children": ["a"] },
+        "s2": { "type": "Section", "props": { "header": "h" }, "children": ["b"] },
+        "a": { "type": "Text", "props": { "text": "一" } },
+        "b": { "type": "Text", "props": { "text": "二" } },
+        "h": { "type": "Text", "props": { "text": [{ "image": "logo.png", "width": 40 }, " 页眉"] } }
+      }
+    }"##;
+    let out = fmtagno::render_str(json, Format::Docx, Some(&dir())).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(out.bytes)).unwrap();
+    let names: Vec<String> = zip.file_names().map(String::from).collect();
+    let mut found = false;
+    for n in names
+        .iter()
+        .filter(|n| n.starts_with("word/header") && n.ends_with(".xml"))
+    {
+        let mut x = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name(n).unwrap(), &mut x).unwrap();
+        let Some(i) = x.find("r:embed=\"") else {
+            continue;
+        };
+        let id = &x[i + 9..i + 9 + x[i + 9..].find('"').unwrap()];
+        let rels = n.replace("word/", "word/_rels/") + ".rels";
+        let mut r = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name(&rels).unwrap(), &mut r).unwrap();
+        assert!(r.contains(&format!("Id=\"{id}\"")), "{rels}: {r}");
+        found = true;
+    }
+    assert!(found, "页眉里没有图片");
+}

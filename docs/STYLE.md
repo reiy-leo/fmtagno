@@ -217,7 +217,33 @@ Word 的列表定义在 numbering.xml：`w:abstractNum` 下每一级一个 `w:lv
 
 各格式怎么做：HTML 用自动布局，auto 列不写宽度；PDF 是 Typst 的 `auto` 列；docx 的 auto 列写 `w:tcW w:type="auto"`，表格宽度写 auto、布局改成 autofit，gridCol 按字数估一个初始宽度（全角字 1em、半角 0.6em，加字间距、左右 padding 和 3pt 余量），Word 打开后按内容重排。有 auto 列又没写 `tableLayout` 时，三种格式都按 `auto` 布局。
 
-合并单元格（w:gridSpan、w:vMerge）放在 Table 的 props 里，不算样式。
+### 合并单元格、单格样式、行高
+
+`rows` 和 `columns` 里的格子可以写字符串、run 数组，也可以写成对象：
+
+```json
+{ "text": "检测结果", "rowSpan": 2, "colSpan": 3, "style": { "borderLeft": "6pt solid #8DC63F" } }
+```
+
+- `text`（也可以叫 `runs`）：字符串或 run 数组。
+- `rowSpan`、`colSpan`：往下、往右合并几格，含自己。被合并掉的位置在后面的行里不用写，行里少写几格就行。超出表格或互相重叠会报错或给警告。
+- `style`：只给这一格的样式，叠在部位样式之后。合并格的边框按整块算：上边框写在首行，下边框写在末行。docx 是 w:gridSpan、w:vMerge，HTML 是 rowspan、colspan，PDF 是 table.cell 的 rowspan、colspan。
+
+行高写在 props `rowHeights`，一行一个值：
+
+- 长度（`"28.35pt"`、数字当 pt）：最小高度，内容多了会撑高。docx 写 `w:hRule="atLeast"`，HTML 是 tr 的 height，PDF 只对单行文字的格子有效。
+- `{ "height": "51.05pt", "rule": "exact" }`：固定高度，内容多了会被裁掉。docx 写 `w:hRule="exact"`，PDF 是 Typst 的 rows。
+- `null`：这一行不管。
+
+### 行内图片
+
+run 里写 `image` 就是行内图片，格子、段落、页眉页脚里都能用：
+
+```json
+{ "image": "images/logo.png", "width": 78.4, "height": 39.3 }
+```
+
+`width`、`height` 单位 pt，只写一个时按图片比例算另一个。docx 是 wp:inline，HTML 是 img，PDF 是 box(image)。
 
 ## 十、页面（`meta.page`，对应 w:sectPr）
 

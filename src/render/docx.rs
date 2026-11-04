@@ -1,6 +1,7 @@
 //! docx 渲染器，基于 docx-rs。样式按算好的结果直接写在段落和 run 上（直接格式）；
 //! 标题、代码另外挂上同名的 Word 样式，方便在 Word 里找和改。
 
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use docx_rs::{
@@ -187,6 +188,12 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
     for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
         *h = mark_behind(h);
     }
+    fix_part_rels(
+        &xml.headers,
+        &mut xml.header_rels,
+        &xml.footers,
+        &mut xml.footer_rels,
+    );
     let mut buf = std::io::Cursor::new(Vec::new());
     xml.pack(&mut buf)?;
     Ok(Output {
@@ -227,6 +234,56 @@ const DUMMY_PAGE: u32 = 1;
 /// 1. 把占位节（纸张 1×1）上的页眉页脚引用挪到它前面那个真正的节上，删掉占位节的段落；
 /// 2. sectPr 里的子元素按 OOXML 规定的顺序排（headerReference 在最前，titlePg 在 cols 后面）；
 /// 3. 按 `cols` 写分栏（docx-rs 的 Section 不让设）。
+/// docx-rs 只按三个固定位置给页眉页脚挂图片关系，页眉页脚多了（每节一个、加占位节）
+/// 图片就挂错文件，Word 里不显示。这里按每个页眉页脚里实际引用的 r:embed / r:id 重排关系。
+fn fix_part_rels(
+    headers: &[Vec<u8>],
+    header_rels: &mut Vec<Vec<u8>>,
+    footers: &[Vec<u8>],
+    footer_rels: &mut Vec<Vec<u8>>,
+) {
+    let mut all: BTreeMap<String, String> = BTreeMap::new();
+    for r in header_rels.iter().chain(footer_rels.iter()) {
+        let r = String::from_utf8_lossy(r);
+        for part in r.split("<Relationship ").skip(1) {
+            let Some(end) = part.find("/>") else { continue };
+            let el = format!("<Relationship {}/>", &part[..end]);
+            if let Some(id) = attr(&el, "Id") {
+                all.insert(id, el);
+            }
+        }
+    }
+    if all.is_empty() {
+        return;
+    }
+    let rebuild = |parts: &[Vec<u8>], rels: &mut Vec<Vec<u8>>| {
+        rels.resize(parts.len().max(rels.len()), Vec::new());
+        for (i, p) in parts.iter().enumerate() {
+            let p = String::from_utf8_lossy(p);
+            let mut out = String::from(
+                r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+            );
+            for (id, el) in &all {
+                if p.contains(&format!("r:embed=\"{id}\"")) || p.contains(&format!("r:id=\"{id}\""))
+                {
+                    out.push_str(el);
+                }
+            }
+            out.push_str("</Relationships>");
+            rels[i] = out.into_bytes();
+        }
+    };
+    rebuild(headers, header_rels);
+    rebuild(footers, footer_rels);
+}
+
+fn attr(el: &str, name: &str) -> Option<String> {
+    let k = format!(" {name}=\"");
+    let i = el.find(&k)? + k.len();
+    let j = el[i..].find('"')?;
+    Some(el[i..i + j].to_string())
+}
+
 fn fix_sections(doc: &[u8], cols: &[Option<(u8, f32)>]) -> Vec<u8> {
     let Ok(xml) = std::str::from_utf8(doc) else {
         return doc.to_vec();
