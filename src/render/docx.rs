@@ -230,10 +230,6 @@ struct HeaderSet {
 /// 占位节的纸张边长（twip），用来在 XML 里认出占位节。
 const DUMMY_PAGE: u32 = 1;
 
-/// 收拾 docx-rs 生成的分节：
-/// 1. 把占位节（纸张 1×1）上的页眉页脚引用挪到它前面那个真正的节上，删掉占位节的段落；
-/// 2. sectPr 里的子元素按 OOXML 规定的顺序排（headerReference 在最前，titlePg 在 cols 后面）；
-/// 3. 按 `cols` 写分栏（docx-rs 的 Section 不让设）。
 /// docx-rs 只按三个固定位置给页眉页脚挂图片关系，页眉页脚多了（每节一个、加占位节）
 /// 图片就挂错文件，Word 里不显示。这里按每个页眉页脚里实际引用的 r:embed / r:id 重排关系。
 fn fix_part_rels(
@@ -284,6 +280,10 @@ fn attr(el: &str, name: &str) -> Option<String> {
     Some(el[i..i + j].to_string())
 }
 
+/// 收拾 docx-rs 生成的分节：
+/// 1. 把占位节（纸张 1×1）上的页眉页脚引用挪到它前面那个真正的节上，删掉占位节的段落；
+/// 2. sectPr 里的子元素按 OOXML 规定的顺序排（headerReference 在最前，titlePg 在 cols 后面）；
+/// 3. 按 `cols` 写分栏（docx-rs 的 Section 不让设）。
 fn fix_sections(doc: &[u8], cols: &[Option<(u8, f32)>]) -> Vec<u8> {
     let Ok(xml) = std::str::from_utf8(doc) else {
         return doc.to_vec();
