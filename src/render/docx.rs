@@ -691,7 +691,11 @@ impl Ctx<'_> {
             if let Some(c) = &ms.color {
                 level = level.color(c.rgb());
             }
-            let msz = if ms.font_size.is_some() { ms.size_pt() } else { fs };
+            let msz = if ms.font_size.is_some() {
+                ms.size_pt()
+            } else {
+                fs
+            };
             level = level.size((msz * 2.0).round() as usize);
             if ms.bold == Some(true) {
                 level = level.bold();
