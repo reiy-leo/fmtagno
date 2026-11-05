@@ -11,7 +11,7 @@ use typst::{
     diag::{FileError, FileResult},
     foundations::{Bytes, Datetime, Duration},
     syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
-    text::{Font, FontBook},
+    text::{Font, FontBook, FontInfo, FontWeight},
     utils::LazyHash,
 };
 use typst_kit::fonts::{self, FontStore};
@@ -1212,9 +1212,58 @@ fn font_store() -> &'static FontStore {
     STORE.get_or_init(|| {
         let mut s = FontStore::new();
         s.extend(fonts::embedded());
-        s.extend(fonts::system());
+        s.extend(fonts::system().map(|(path, mut info)| {
+            normalize_weight(&mut info, &path.path, path.index);
+            (path, info)
+        }));
         s
     })
+}
+
+/// 有的字体 OS/2 里的字重不是整百，比如 MiSans：Regular 330、Medium 380、Bold 630。
+/// typst 按数值找最近的字重，要 400 会拿到 Medium，要 700 会拿到 Heavy。
+/// 这种字体按它自己的字重名（Regular、Bold……）改成标准数值；认不出的名字不动。
+fn normalize_weight(info: &mut FontInfo, path: &std::path::Path, index: u32) {
+    if info.variant.weight.to_number() % 100 == 0 {
+        return;
+    }
+    let Ok(data) = std::fs::read(path) else {
+        return;
+    };
+    let Ok(face) = ttf_parser::Face::parse(&data, index) else {
+        return;
+    };
+    let name = |id: u16| {
+        face.names()
+            .into_iter()
+            .filter(|n| n.name_id == id && n.is_unicode())
+            .find_map(|n| n.to_string())
+    };
+    let Some(sub) = name(ttf_parser::name_id::TYPOGRAPHIC_SUBFAMILY)
+        .or_else(|| name(ttf_parser::name_id::SUBFAMILY))
+    else {
+        return;
+    };
+    let key: String = sub
+        .to_lowercase()
+        .replace("italic", "")
+        .replace("oblique", "")
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .collect();
+    let w = match key.as_str() {
+        "thin" | "hairline" => 100,
+        "extralight" | "ultralight" => 200,
+        "light" => 300,
+        "regular" | "book" | "" => 400,
+        "medium" => 500,
+        "semibold" | "demibold" => 600,
+        "bold" => 700,
+        "extrabold" | "ultrabold" => 800,
+        "heavy" | "black" => 900,
+        _ => return,
+    };
+    info.variant.weight = FontWeight::from_number(w);
 }
 
 fn library() -> &'static LazyHash<Library> {
