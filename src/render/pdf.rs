@@ -398,12 +398,14 @@ impl Markup<'_> {
             let (asc, desc) = edge_metrics(s);
             let half = match l {
                 LineHeight::Multiple(x) => format!("{:.3}em", ((x - asc - desc) / 2.0).max(0.0)),
-                LineHeight::Exact(x) | LineHeight::AtLeast(x) => {
-                    format!(
-                        "{:.2}pt",
-                        ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0)
-                    )
+                // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）
+                LineHeight::Exact(x) => {
+                    format!("{:.2}pt", (x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0)
                 }
+                LineHeight::AtLeast(x) => format!(
+                    "{:.2}pt",
+                    ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0)
+                ),
             };
             let _ = writeln!(
                 sets,
