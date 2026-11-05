@@ -154,6 +154,9 @@ pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<Str
     (m.out, m.files, m.warn.list)
 }
 
+// Word 在节开头和手动分页之后保留段前距，typst 会把页顶的 above 吞掉；放一个零高的块垫着
+const TOP_ANCHOR: &str = "#block(height: 0pt, above: 0pt, below: 0pt)\n";
+
 struct Markup<'a> {
     out: String,
     files: Files,
@@ -251,7 +254,10 @@ impl Markup<'_> {
             Component::List(p) => self.list(n, p, parent),
             Component::Table(p) => self.table(n, p, parent),
             Component::Image(p) => self.image(n, p, parent),
-            Component::PageBreak(_) => self.out.push_str("#pagebreak()\n"),
+            Component::PageBreak(_) => {
+                self.out.push_str("#pagebreak()\n");
+                self.out.push_str(TOP_ANCHOR);
+            }
             Component::Section(p) => self.section(n, p.layout(), parent),
         }
     }
@@ -287,6 +293,7 @@ impl Markup<'_> {
             .page_number_start
             .map_or("none".to_string(), |x| x.to_string());
         let _ = writeln!(o, "#metadata({start}) <fmtagno-sec>");
+        o.push_str(TOP_ANCHOR);
         self.out.push_str(&o);
         let body = self.children_src(n);
         let src = self.scope_src(body, &n.style, parent, &n.id);
