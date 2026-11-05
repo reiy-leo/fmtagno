@@ -11,7 +11,7 @@ use typst::{
     diag::{FileError, FileResult},
     foundations::{Bytes, Datetime, Duration},
     syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
-    text::{Font, FontBook, FontInfo, FontWeight},
+    text::{Font, FontBook, FontInfo, FontVariant, FontWeight},
     utils::LazyHash,
 };
 use typst_kit::fonts::{self, FontStore};
@@ -48,9 +48,7 @@ const FONTS: &[&str] = &[
     "Libertinus Serif",
 ];
 const MONO_FONTS: &[&str] = &["Menlo", "Consolas", "DejaVu Sans Mono"];
-/// 文字盒高度（ascender 到 descender）约等于字号的这么多倍，用来把行高倍数换成 typst 的 leading。
-const GLYPH_BOX: f32 = 1.17;
-/// 行盒基线以上、以下的部分（合起来是 GLYPH_BOX），按常见中文字体估的。
+/// 找不到字体度量时，行盒基线以上、以下的部分，按常见中文字体估的。
 const ASCENT: f32 = 0.88;
 const DESCENT: f32 = 0.29;
 
@@ -395,15 +393,21 @@ impl Markup<'_> {
             // 像 CSS 那样把多出来的行距对半分到每行上下（half-leading），
             // 单行的段落、列表项也就有了行高，和 HTML、Word 的间距对得上。
             // 行间距交给行盒，leading 归零。
+            // 基线上下各占多少按字体自己的 ascender/descender 分（Word 也是），
+            // 不然像 MiSans 这种下沉较深的字体，字在行盒里会偏上
+            let (asc, desc) = edge_metrics(s);
             let half = match l {
-                LineHeight::Multiple(x) => format!("{:.3}em", ((x - GLYPH_BOX) / 2.0).max(0.0)),
+                LineHeight::Multiple(x) => format!("{:.3}em", ((x - asc - desc) / 2.0).max(0.0)),
                 LineHeight::Exact(x) | LineHeight::AtLeast(x) => {
-                    format!("{:.2}pt", ((x.pt(fs, 0.0) - GLYPH_BOX * fs) / 2.0).max(0.0))
+                    format!(
+                        "{:.2}pt",
+                        ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0)
+                    )
                 }
             };
             let _ = writeln!(
                 sets,
-                "#set text(top-edge: {ASCENT}em + {half}, bottom-edge: -{DESCENT}em - {half})"
+                "#set text(top-edge: {asc:.3}em + {half}, bottom-edge: -{desc:.3}em - {half})"
             );
             par.push("leading: 0pt".into());
         }
@@ -1220,6 +1224,39 @@ fn font_list(s: &Style, mono: bool) -> String {
     v.extend(FONTS.iter().map(|x| x.to_string()));
     let refs: Vec<&str> = v.iter().map(String::as_str).collect();
     lits(&refs)
+}
+
+/// 样式里第一个找得到的字体的 ascender、descender（em，descender 取正）。
+/// 都找不到就用按常见中文字体估的值。
+fn edge_metrics(s: &Style) -> (f32, f32) {
+    let store = font_store();
+    let mut fams: Vec<String> = Vec::new();
+    if let Some(f) = &s.font_family {
+        for x in f.fallback() {
+            fams.extend(
+                x.split(',')
+                    .map(|y| y.trim().to_string())
+                    .filter(|y| !y.is_empty()),
+            );
+        }
+    }
+    fams.extend(FONTS.iter().map(|x| x.to_string()));
+    for fam in fams {
+        let Some(i) = store
+            .book()
+            .select(&fam.to_lowercase(), FontVariant::default())
+        else {
+            continue;
+        };
+        if let Some(font) = store.font(i) {
+            let m = font.metrics();
+            let (a, d) = (m.ascender.get() as f32, -m.descender.get() as f32);
+            if a > 0.0 && d >= 0.0 {
+                return (a, d);
+            }
+        }
+    }
+    (ASCENT, DESCENT)
 }
 
 /// 字体只扫一次：typst 自带字体加系统字体。

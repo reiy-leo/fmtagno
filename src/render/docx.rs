@@ -1211,7 +1211,15 @@ impl Ctx<'_> {
         if any {
             p = p.line_spacing(ls);
         }
-        let left = s.margin_left.map(|l| units::twip(l.pt(fs, 0.0)));
+        // Word 的 hanging 是首行往左伸出去；我们的 hangingIndent 是首行不动、其余行往里缩，
+        // 和 PDF、HTML 一样，所以左缩进要加上悬挂量
+        let left = match (s.margin_left, s.hanging_indent) {
+            (ml, Some(h)) => Some(units::twip(
+                ml.map(|l| l.pt(fs, 0.0)).unwrap_or(0.0) + h.pt(fs, 0.0),
+            )),
+            (Some(l), None) => Some(units::twip(l.pt(fs, 0.0))),
+            (None, None) => None,
+        };
         let right = s.margin_right.map(|l| units::twip(l.pt(fs, 0.0)));
         let special = match (s.hanging_indent, s.text_indent) {
             (Some(h), _) => Some(SpecialIndentType::Hanging(units::twip(h.pt(fs, 0.0)))),
