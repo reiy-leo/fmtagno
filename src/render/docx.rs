@@ -1124,9 +1124,21 @@ impl Ctx<'_> {
         }
         ps.width = None;
         ps.height = None;
-        let para = self
-            .para(Paragraph::new(), &ps, &n.id)
-            .add_run(Run::new().add_image(pic));
+        let mut para = self.para(Paragraph::new(), &ps, &n.id);
+        // 按页或页边距定位的图片不该占正文的行：Word 的锚点得落在一个段落里，
+        // 把这个段落压成 1pt 高、无段前段后，别把后面的内容往下推（PDF、HTML 里它本来就不占位）
+        if s.position == Some(Position::Absolute)
+            && !matches!(s.anchor_to, Some(AnchorTo::Paragraph))
+        {
+            para = para.line_spacing(
+                LineSpacing::new()
+                    .before(0)
+                    .after(0)
+                    .line(20)
+                    .line_rule(LineSpacingType::Exact),
+            );
+        }
+        let para = para.add_run(Run::new().add_image(pic).size(2));
         self.blocks.push(Block::P(para));
         if let Some(c) = &p.caption {
             let mut cs = s.inherited();

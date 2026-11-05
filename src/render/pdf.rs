@@ -536,12 +536,21 @@ impl Markup<'_> {
             ],
             [ins[0], ins[1], ins[2], ins[3]],
         );
-        let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
         let ml = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         let mr = s.margin_right.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         if ml != 0.0 || mr != 0.0 {
-            let _ = writeln!(src, "#pad(left: {ml}pt, right: {mr}pt)[{inner}]");
+            // 段前段后距要放在 pad 外层的块上，放在 pad 里面会被当成容器开头吞掉
+            let (gap, rest): (Vec<String>, Vec<String>) = args
+                .into_iter()
+                .partition(|a| a.starts_with("above:") || a.starts_with("below:"));
+            let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", rest.join(", "));
+            let _ = writeln!(
+                src,
+                "#block({})[#pad(left: {ml}pt, right: {mr}pt)[{inner}]]",
+                gap.join(", ")
+            );
         } else {
+            let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
             let _ = writeln!(src, "{inner}");
         }
         src
