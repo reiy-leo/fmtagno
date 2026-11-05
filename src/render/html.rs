@@ -123,14 +123,15 @@ class FmtagnoRepeatThead extends Paged.Handler {
 Paged.registerHandlers(FmtagnoRepeatThead);";
 
 /// 按页显示时的屏幕样式：灰底、白纸、阴影；正文不再限宽，屏幕上的分页虚线也不要了。
-/// 带 data-pagedjs-ignore，Paged.js 不去改写它。
+/// 带 data-pagedjs-ignore，Paged.js 不去改写它；但 Paged.js 会把原样式表重新插到后面，
+/// 同样优先级会被盖掉，所以去虚线这两条加 !important。
 const PAGED_CSS: &str = "<style data-pagedjs-ignore>
 @media screen {
   body { max-width: none; margin: 0; padding: 0; background: #e8eaed; }
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; padding: 24px 0; }
   .pagedjs_page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); margin-bottom: 24px; }
-  .fmtagno-pagebreak { border-top: none; margin: 0; }
-  .fmtagno-section + .fmtagno-section { border-top: none; margin-top: 0; padding-top: 0; }
+  .fmtagno-pagebreak { border-top: none !important; margin: 0 !important; }
+  .fmtagno-section + .fmtagno-section { border-top: none !important; margin-top: 0 !important; padding-top: 0 !important; }
 }
 .pagedjs_pagebox { position: relative; isolation: isolate; }
 .pagedjs_area { position: relative; }
