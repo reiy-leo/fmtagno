@@ -1212,21 +1212,27 @@ fn font_store() -> &'static FontStore {
     STORE.get_or_init(|| {
         let mut s = FontStore::new();
         s.extend(fonts::embedded());
-        s.extend(fonts::system().map(|(path, mut info)| {
-            normalize_weight(&mut info, &path.path, path.index);
-            (path, info)
-        }));
+        let mut sys: Vec<_> = fonts::system().collect();
+        // 一族里只要有一个字重不是整百，整族都按名字归一，免得 Heavy 正好是 700 抢了 Bold
+        let odd: std::collections::HashSet<String> = sys
+            .iter()
+            .filter(|(_, i)| i.variant.weight.to_number() % 100 != 0)
+            .map(|(_, i)| i.family.clone())
+            .collect();
+        for (path, info) in sys.iter_mut() {
+            if odd.contains(&info.family) {
+                normalize_weight(info, &path.path, path.index);
+            }
+        }
+        s.extend(sys);
         s
     })
 }
 
 /// 有的字体 OS/2 里的字重不是整百，比如 MiSans：Regular 330、Medium 380、Bold 630。
 /// typst 按数值找最近的字重，要 400 会拿到 Medium，要 700 会拿到 Heavy。
-/// 这种字体按它自己的字重名（Regular、Bold……）改成标准数值；认不出的名字不动。
+/// 这种字体整族按各自的字重名（Regular、Bold……）改成标准数值；认不出的名字不动。
 fn normalize_weight(info: &mut FontInfo, path: &std::path::Path, index: u32) {
-    if info.variant.weight.to_number() % 100 == 0 {
-        return;
-    }
     let Ok(data) = std::fs::read(path) else {
         return;
     };
