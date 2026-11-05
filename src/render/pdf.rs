@@ -1248,9 +1248,11 @@ fn edge_metrics(s: &Style) -> (f32, f32) {
         else {
             continue;
         };
-        if let Some(font) = store.font(i) {
-            let m = font.metrics();
-            let (a, d) = (m.ascender.get() as f32, -m.descender.get() as f32);
+        if let Some(font) = store.font(i)
+            && let Ok(face) = ttf_parser::Face::parse(font.data(), font.index())
+        {
+            let u = face.units_per_em() as f32;
+            let (a, d) = (face.ascender() as f32 / u, -(face.descender() as f32) / u);
             if a > 0.0 && d >= 0.0 {
                 return (a, d);
             }
