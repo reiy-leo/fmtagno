@@ -72,8 +72,8 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `spaceBefore` | 长度或 `"Nline"` | w:spacing before / beforeLines | a:spcBef | — | margin-top | block above |
 | `spaceAfter` | 同上 | w:spacing after / afterLines | a:spcAft | — | margin-bottom | block below |
 | `lineHeight` | 数字是倍数，按 CSS 算（字号 × 倍数）；长度是固定值；`{ atLeast: 长度 }` 是最小值 | w:spacing line + lineRule（倍数写成 atLeast 字号 × 倍数，不用 auto：Word 的 auto 乘的是字体自己的单倍行高，雅黑约 1.32 倍字号；固定值 exact；最小值 atLeast） | a:lnSpc（spcPct / spcPts） | — | line-height | par leading（近似） |
-| `marginLeft` | 长度，整段左缩进 | w:ind start | marL | indent（按字符数，只有整数） | margin-left | pad |
-| `marginRight` | 长度，整段右缩进 | w:ind end | — | — | margin-right | pad |
+| `marginLeft` | 长度，整段左缩进 | w:ind start（`em` 时加 leftChars） | marL | indent（按字符数，只有整数） | margin-left | pad |
+| `marginRight` | 长度，整段右缩进 | w:ind end（`em` 时加 rightChars） | — | — | margin-right | pad |
 | `textIndent` | 长度，首行缩进 | w:ind firstLine（`em` 时用 firstLineChars） | indent（正数） | — | text-indent | first-line-indent |
 | `hangingIndent` | 长度，悬挂缩进：除首行外其他行缩进，和 `textIndent` 只能写一个 | w:ind hanging / hangingChars | indent（负数）+ marL | — | padding-left + 负 text-indent | hanging-indent |
 | `keepWithNext` | 布尔 | w:keepNext | — | — | break-after: avoid | 用 block(breakable) 近似 |

@@ -100,6 +100,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         blocks: Vec::new(),
         numberings: Vec::new(),
         repeat_heads: Vec::new(),
+        ind_chars: Vec::new(),
         sections: Vec::new(),
         root: tree.clone(),
     };
@@ -213,8 +214,10 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
     xml.document = mark_table_headers(&xml.document, &r.repeat_heads);
     xml.document = fix_sections(&xml.document, &cols);
     xml.document = mark_behind(&xml.document);
+    xml.document = fix_ind_chars(&xml.document, &r.ind_chars);
     for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
         *h = mark_behind(h);
+        *h = fix_ind_chars(h, &r.ind_chars);
     }
     fix_part_rels(
         &xml.headers,
@@ -437,6 +440,73 @@ fn elements(body: &str) -> Vec<String> {
 /// 衬于文字下方的图片在 relativeHeight 上的记号，见 `mark_behind`。
 const BEHIND_MARK: u32 = 190_499;
 
+/// 一段按字符计的缩进，单位是百分之一字符（Word 的 leftChars 等）。
+#[derive(Default)]
+struct IndChars {
+    /// 真正的右缩进（twip），w:right 先写成占位值
+    right: i32,
+    left_chars: Option<i32>,
+    right_chars: Option<i32>,
+    hanging_chars: Option<i32>,
+    first_line_chars: Option<i32>,
+}
+
+/// w:right 写成 IND_MARK + 序号，生成 XML 后按序号换回真值并补上 *Chars。
+const IND_MARK: i32 = 1_000_000_000;
+
+/// docx-rs 只写 w:left / w:right / w:hanging / w:firstLine（hangingChars 等存了但不输出），
+/// 这里把按字符计的缩进补进 <w:ind>，Word 改字号时缩进跟着变。
+fn fix_ind_chars(xml: &[u8], list: &[IndChars]) -> Vec<u8> {
+    if list.is_empty() {
+        return xml.to_vec();
+    }
+    let s = String::from_utf8_lossy(xml);
+    let mut out = String::with_capacity(s.len());
+    let mut rest: &str = &s;
+    const KEY: &str = "w:right=\"";
+    while let Some(i) = rest.find("<w:ind ") {
+        let end = rest[i..].find('>').map(|e| i + e).unwrap_or(rest.len());
+        let tag = &rest[i..end];
+        out.push_str(&rest[..i]);
+        let hit = tag.find(KEY).and_then(|k| {
+            let v = &tag[k + KEY.len()..];
+            let q = v.find('"')?;
+            let n: i32 = v[..q].parse().ok()?;
+            let ic = list.get(usize::try_from(n.checked_sub(IND_MARK)?).ok()?)?;
+            Some((k, k + KEY.len() + q + 1, ic))
+        });
+        match hit {
+            Some((a, b, ic)) => {
+                let t0 = format!("{}w:right=\"{}\"{}", &tag[..a], ic.right, &tag[b..]);
+                // 自闭合标签的 / 要留在最后，先拿掉，补完属性再加回
+                let (body, close) = match t0.trim_end().strip_suffix('/') {
+                    Some(x) => (x.trim_end().to_string(), " /"),
+                    None => (t0.clone(), ""),
+                };
+                let mut t = body;
+                for (name, v) in [
+                    ("leftChars", ic.left_chars),
+                    ("rightChars", ic.right_chars),
+                    ("hangingChars", ic.hanging_chars),
+                    ("firstLineChars", ic.first_line_chars),
+                ] {
+                    if let Some(v) = v
+                        && !t.contains(&format!("w:{name}="))
+                    {
+                        t.push_str(&format!(" w:{name}=\"{v}\""));
+                    }
+                }
+                out.push_str(&t);
+                out.push_str(close);
+            }
+            None => out.push_str(tag),
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out.into_bytes()
+}
+
 /// 把带记号的浮动图片改成衬于文字下方（behindDoc="1"）。
 fn mark_behind(xml: &[u8]) -> Vec<u8> {
     let s = String::from_utf8_lossy(xml);
@@ -513,6 +583,8 @@ struct Ctx<'a> {
     numberings: Vec<(AbstractNumbering, Numbering)>,
     /// 按出现顺序，每张表的表头要不要跨页重复
     repeat_heads: Vec<bool>,
+    /// 按字符计的缩进（em），docx-rs 写不出来，生成 XML 后补上（fix_ind_chars）
+    ind_chars: Vec<IndChars>,
     /// 每节的版面和内容
     sections: Vec<(SectionLayout, Vec<Block>)>,
     /// 整棵树，目录要从里面收标题
@@ -1322,12 +1394,38 @@ impl Ctx<'_> {
             _ => None,
         };
         if left.is_some() || right.is_some() || special.is_some() {
+            // 写成 em 的缩进同时写 Word 的字符单位，Word 里改字号时跟着变
+            let em = |l: Option<Len>| match l {
+                Some(Len::Em(x)) => Some((x * 100.0).round() as i32),
+                _ => None,
+            };
+            let ic = IndChars {
+                right: right.unwrap_or(0),
+                left_chars: match (s.margin_left, s.hanging_indent) {
+                    (Some(Len::Em(l)), Some(Len::Em(h))) => Some(((l + h) * 100.0).round() as i32),
+                    (None, Some(Len::Em(h))) => Some((h * 100.0).round() as i32),
+                    (l, None) => em(l),
+                    _ => None,
+                },
+                right_chars: em(s.margin_right),
+                hanging_chars: em(s.hanging_indent),
+                first_line_chars: if s.hanging_indent.is_none() {
+                    em(s.text_indent)
+                } else {
+                    None
+                },
+            };
+            let right = if ic.left_chars.is_some()
+                || ic.right_chars.is_some()
+                || ic.hanging_chars.is_some()
+                || ic.first_line_chars.is_some()
+            {
+                self.ind_chars.push(ic);
+                Some(IND_MARK + self.ind_chars.len() as i32 - 1)
+            } else {
+                right
+            };
             p = p.indent(left, special, right, None);
-            match (s.hanging_indent, s.text_indent) {
-                (Some(Len::Em(x)), _) => p = p.hanging_chars((x * 100.0) as i32),
-                (None, Some(Len::Em(x))) => p = p.first_line_chars((x * 100.0) as i32),
-                _ => {}
-            }
         }
         if let Some(v) = s.keep_with_next {
             p = p.keep_next(v);

@@ -122,3 +122,32 @@ fn auto_columns_and_part_padding() {
         "auto 表格不该撑满版心"
     );
 }
+
+/// em 缩进同时写 Word 的字符单位（leftChars、rightChars、firstLineChars、hangingChars）。
+#[test]
+fn em_indent_writes_chars() {
+    let json = r##"{
+      "root": "d",
+      "elements": {
+        "d": { "type": "Document", "children": ["a", "b", "c"] },
+        "a": { "type": "Text", "props": { "text": "a" },
+               "style": { "fontSize": 12, "marginLeft": "2em", "marginRight": "1em", "textIndent": "2em" } },
+        "b": { "type": "Text", "props": { "text": "b" },
+               "style": { "fontSize": 12, "marginLeft": "1em", "hangingIndent": "2em" } },
+        "c": { "type": "Text", "props": { "text": "c" },
+               "style": { "fontSize": 12, "marginLeft": "20pt", "marginRight": 10 } }
+      }
+    }"##;
+    let out = fmtagno::render_str(json, Format::Docx, None).unwrap();
+    let b = &out.bytes;
+    assert!(has(
+        b,
+        r#"<w:ind w:left="480" w:right="240" w:firstLine="480" w:leftChars="200" w:rightChars="100" w:firstLineChars="200" />"#
+    ));
+    assert!(has(
+        b,
+        r#"<w:ind w:left="720" w:right="0" w:hanging="480" w:leftChars="300" w:hangingChars="200" />"#
+    ));
+    assert!(has(b, r#"<w:ind w:left="400" w:right="200" />"#));
+    assert!(!has(b, "w:right=\"100000"));
+}
