@@ -2722,11 +2722,22 @@ impl Ctx {
         // 页眉页脚：逐节累积，判断哪些要写 null
         let mut seen_h = [false; 3];
         let mut seen_f = [false; 3];
-        let n = sects.len();
+        let mut prev_full: Option<Map<String, Value>> = None;
+        // 写过单边页边距以后，后面的节不能再用 margin 合写（单边的会一直盖着它）
+        let mut sides_used = false;
         for (i, (blocks, s)) in sects.into_iter().enumerate() {
-            let mut page = page_json(&s);
-            let header = self.hf_def(&s, &s.headers, i, &mut seen_h);
-            let footer = self.hf_def(&s, &s.footers, i, &mut seen_f);
+            // 第一节写全；后面的节只写和上一节不一样的（没写的沿用上一节）
+            let full = page_full(&s);
+            let mut page = match &prev_full {
+                None => page_json(&s),
+                Some(prev) => page_changes(prev, &full, !sides_used),
+            };
+            sides_used |= ["marginTop", "marginRight", "marginBottom", "marginLeft"]
+                .iter()
+                .any(|k| page.contains_key(*k));
+            prev_full = Some(full);
+            let header = self.hf_def(&s, &s.headers, i, &mut seen_h, false);
+            let footer = self.hf_def(&s, &s.footers, i, &mut seen_f, true);
             if let Some(h) = header {
                 page.insert("header".into(), h);
             }
@@ -2748,7 +2759,6 @@ impl Ctx {
                 root_children.push(json!(id));
             }
         }
-        let _ = n;
         self.add(
             "doc",
             json!({ "type": "Document", "children": root_children }),
@@ -2773,6 +2783,7 @@ impl Ctx {
         refs: &[(String, String)],
         i: usize,
         seen: &mut [bool; 3],
+        footer: bool,
     ) -> Option<Value> {
         let mut m = Map::new();
         for (slot, kind) in ["default", "first", "even"].iter().enumerate() {
@@ -2787,7 +2798,7 @@ impl Ctx {
                 .find(|(t, _)| t == kind)
                 .map(|(_, id)| id.clone());
             let v = match r {
-                Some(rid) => self.hf_element(&rid),
+                Some(rid) => self.hf_element(&rid, footer),
                 None => {
                     if *kind == "first" && i == 0 {
                         None
@@ -2821,7 +2832,7 @@ impl Ctx {
     }
 
     /// 页眉页脚部件 → 元素 id；没内容时 None。
-    fn hf_element(&mut self, rid: &str) -> Option<String> {
+    fn hf_element(&mut self, rid: &str, footer: bool) -> Option<String> {
         let rel = self.rels.get(rid)?.clone();
         if let Some(x) = self.hf_cache.get(&rel.target) {
             return x.clone();
@@ -2850,16 +2861,16 @@ impl Ctx {
                 self.elements.remove(id);
             }
             None
-        } else if blocks.len() == 1 {
-            Some(blocks[0].clone())
         } else {
-            let kind = if rel.target.contains("footer") {
-                "footer"
+            // 页眉页脚的元素 id 叫 header1、footer1，好认
+            let id = self.id(if footer { "footer" } else { "header" });
+            if blocks.len() == 1 {
+                if let Some(el) = self.elements.remove(&blocks[0]) {
+                    self.add(&id, el);
+                }
             } else {
-                "header"
-            };
-            let id = self.id(if kind == "footer" { "footer" } else { "header" });
-            self.add(&id, json!({ "type": "Document", "children": blocks }));
+                self.add(&id, json!({ "type": "Document", "children": blocks }));
+            }
             Some(id)
         };
         self.hf_cache.insert(rel.target, out.clone());
@@ -3186,6 +3197,64 @@ fn page_json(s: &Sect) -> Map<String, Value> {
         m.insert("columns".into(), json!({ "count": c, "gap": round2(g) }));
     }
     m
+}
+
+/// 一节的纸张设置，每个字段都写出来，用来和上一节比较。
+fn page_full(s: &Sect) -> Map<String, Value> {
+    let p = page_json(s);
+    let main = p["margin"].clone();
+    let mut m = Map::new();
+    m.insert("size".into(), p["size"].clone());
+    m.insert(
+        "landscape".into(),
+        p.get("landscape").cloned().unwrap_or(json!(false)),
+    );
+    for k in ["marginTop", "marginRight", "marginBottom", "marginLeft"] {
+        m.insert(k.into(), p.get(k).cloned().unwrap_or_else(|| main.clone()));
+    }
+    m.insert(
+        "headerDistance".into(),
+        p.get("headerDistance").cloned().unwrap_or(json!(36)),
+    );
+    m.insert(
+        "footerDistance".into(),
+        p.get("footerDistance").cloned().unwrap_or(json!(36)),
+    );
+    m.insert(
+        "gutter".into(),
+        p.get("gutter").cloned().unwrap_or(json!(0)),
+    );
+    m.insert(
+        "columns".into(),
+        p.get("columns").cloned().unwrap_or(json!({ "count": 1 })),
+    );
+    m
+}
+
+/// 这一节和上一节不一样的纸张设置；四边页边距都变了并且一样时合成 margin。
+fn page_changes(
+    prev: &Map<String, Value>,
+    cur: &Map<String, Value>,
+    collapse: bool,
+) -> Map<String, Value> {
+    let mut out = Map::new();
+    for (k, v) in cur {
+        if !prev.get(k).is_some_and(|p| same(p, v)) {
+            out.insert(k.clone(), v.clone());
+        }
+    }
+    let sides = ["marginTop", "marginRight", "marginBottom", "marginLeft"];
+    if collapse
+        && sides.iter().all(|k| out.contains_key(*k))
+        && sides.iter().all(|k| same(&out[*k], &out["marginTop"]))
+    {
+        let v = out["marginTop"].clone();
+        for k in sides {
+            out.remove(k);
+        }
+        out.insert("margin".into(), v);
+    }
+    out
 }
 
 /// 给测试和命令行用：长度写成 JSON 值。
