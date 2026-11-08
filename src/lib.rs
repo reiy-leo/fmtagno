@@ -6,6 +6,7 @@ pub mod components;
 pub mod custom;
 pub mod doc;
 pub mod math;
+pub mod parse;
 pub mod render;
 pub mod style;
 pub mod units;

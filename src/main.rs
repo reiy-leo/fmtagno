@@ -74,6 +74,16 @@ enum Cmd {
         #[arg(long)]
         catalog: Vec<PathBuf>,
     },
+    /// 从 Word 文档解析出 JSON：fmtagno parse doc.docx -o doc.json（输入写 - 表示从标准输入读）
+    Parse {
+        input: PathBuf,
+        /// 输出的 JSON 文件；不写或写 - 时输出到标准输出
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// 图片导出到哪个目录，相对 JSON 所在的目录；默认是「JSON 文件名.assets」
+        #[arg(long)]
+        assets: Option<PathBuf>,
+    },
     /// 以 MCP server 方式运行（stdio），还没实现
     Mcp,
 }
@@ -189,6 +199,78 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Parse {
+            input,
+            output,
+            assets,
+        } => parse_cmd(&input, output.as_deref(), assets.as_deref()),
         Cmd::Mcp => bail!("MCP server 还没实现"),
     }
+}
+
+/// parse 子命令：读 docx，写 JSON 和图片目录。
+fn parse_cmd(input: &Path, output: Option<&Path>, assets: Option<&Path>) -> Result<()> {
+    let bytes = if input == Path::new("-") {
+        let mut b = Vec::new();
+        std::io::stdin().read_to_end(&mut b)?;
+        b
+    } else {
+        std::fs::read(input).with_context(|| format!("读不了 {}", input.display()))?
+    };
+    let output = output.filter(|o| *o != Path::new("-"));
+    // JSON 所在目录：图片目录相对它
+    let json_dir = match output {
+        Some(o) => o.parent().map(Path::to_path_buf).unwrap_or_default(),
+        None => PathBuf::new(),
+    };
+    let stem = output
+        .or((input != Path::new("-")).then_some(input))
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("document")
+        .to_string();
+    let rel = assets
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(format!("{stem}.assets")));
+    let prefix = rel.to_string_lossy().replace('\\', "/");
+    let parsed = fmtagno::parse::docx(
+        &bytes,
+        &fmtagno::parse::Options {
+            assets_dir: prefix.clone(),
+        },
+    )
+    .with_context(|| format!("{} 解析不了", input.display()))?;
+    for w in &parsed.warnings {
+        eprintln!("警告：{w}");
+    }
+    if !parsed.assets.is_empty() {
+        let dir = if rel.is_absolute() {
+            rel.clone()
+        } else {
+            json_dir.join(&rel)
+        };
+        std::fs::create_dir_all(&dir).with_context(|| format!("建不了目录 {}", dir.display()))?;
+        for (name, data) in &parsed.assets {
+            let p = dir.join(name);
+            std::fs::write(&p, data).with_context(|| format!("写不了 {}", p.display()))?;
+        }
+    }
+    let text = serde_json::to_string_pretty(&parsed.json)? + "\n";
+    match output {
+        Some(o) => {
+            std::fs::write(o, text).with_context(|| format!("写不了 {}", o.display()))?;
+            if parsed.assets.is_empty() {
+                eprintln!("已生成 {}", o.display());
+            } else {
+                eprintln!(
+                    "已生成 {}，图片 {} 张在 {}/",
+                    o.display(),
+                    parsed.assets.len(),
+                    prefix
+                );
+            }
+        }
+        None => std::io::stdout().write_all(text.as_bytes())?,
+    }
+    Ok(())
 }

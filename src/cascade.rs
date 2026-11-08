@@ -506,7 +506,7 @@ fn parse_obj(v: &Value) -> Result<Style> {
 }
 
 /// 内置默认样式。`$global` 是根元素的起点。
-fn builtin(key: &str) -> Option<&'static Style> {
+pub(crate) fn builtin(key: &str) -> Option<&'static Style> {
     static B: OnceLock<BTreeMap<String, Style>> = OnceLock::new();
     B.get_or_init(|| {
         let mono = json!({ "latin": "Menlo, Consolas, DejaVu Sans Mono" });

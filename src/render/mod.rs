@@ -1,6 +1,6 @@
 //! 各格式的渲染器。
 
-mod common;
+pub(crate) mod common;
 pub mod docx;
 pub mod html;
 pub mod markdown;

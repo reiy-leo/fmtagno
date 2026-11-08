@@ -24,10 +24,9 @@ typst = "0.15.1"
 typst-pdf = "0.15.1"
 typst-layout = "0.15.1"
 ttf-parser = "0.25"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 typst-kit = { version = "0.15.1", default-features = false, features = ["embedded-fonts", "scan-fonts"] }
 
-[dev-dependencies]
-zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [profile.release]
 lto = "thin"
