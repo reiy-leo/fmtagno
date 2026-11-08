@@ -2495,8 +2495,10 @@ impl Ctx {
                 parts.insert(format!("level{level}"), Value::Object(pd));
             }
         }
-        // 项与项之间的间距
-        if items.len() > 1 {
+        // 项与项之间的间距；contextualSpacing（同样式段落之间不加段距）开着时就是没有间距
+        let contextual = items.iter().all(|p| p.ppr.contextual == Some(true));
+        d.remove("contextualSpacing");
+        if items.len() > 1 && !contextual {
             let afters: Vec<f32> = items[..items.len() - 1]
                 .iter()
                 .map(|p| p.ppr.to_style(fs).space_after.map(|l| l.pt(fs, 0.0)).unwrap_or(0.0))

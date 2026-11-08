@@ -350,10 +350,18 @@ impl Ctx {
         let block_info: Vec<(Map<String, Value>, Vec<String>, Vec<Seg>)> = blocks
             .iter()
             .map(|&b| {
-                let paras: Vec<&Para> = (0..cells.len())
+                // 竖着合并时，下面几格（continue）里的空段落不算
+                let mut paras: Vec<&Para> = (0..cells.len())
                     .filter(|i| origin[*i] == b)
-                    .flat_map(|i| cells[i].paras.iter())
+                    .flat_map(|i| {
+                        let cont = i != b;
+                        cells[i].paras.iter().filter(move |p| !cont || !p.segs.is_empty())
+                    })
                     .collect();
+                // 格子末尾的空段落也不要（不然文字后面多一个换行）
+                while paras.len() > 1 && paras.last().is_some_and(|p| p.segs.is_empty()) {
+                    paras.pop();
+                }
                 let mut segs: Vec<Seg> = Vec::new();
                 for (k, p) in paras.iter().enumerate() {
                     if k > 0 {
