@@ -1398,11 +1398,11 @@ fn line_edges(s: &Style, l: LineHeight, fs: f32) -> String {
                 desc + half
             )
         }
-        // 固定行高就是这么高，字体盒比它高也照样压进去。Word 把多出来（或不够）的
-        // 高度都算在基线上面：基线离行底永远是一个 descender，字号变了也一样
+        // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）。
+        // 写成「行高一半 ± (asc-desc)/2 em」，格子里单独改了字号也还是这个行高
         LineHeight::Exact(x) => {
-            let h = x.pt(fs, 0.0);
-            format!("top-edge: {h:.2}pt - {desc:.3}em, bottom-edge: -{desc:.3}em")
+            let (h, c) = (x.pt(fs, 0.0) / 2.0, (asc - desc) / 2.0);
+            format!("top-edge: {h:.2}pt + {c:.3}em, bottom-edge: -{h:.2}pt + {c:.3}em")
         }
         LineHeight::AtLeast(x) => {
             let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
