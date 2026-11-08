@@ -758,13 +758,11 @@ impl PPr {
 pub struct WStyle {
     pub id: String,
     pub name: String,
-    pub kind: String,
     pub based_on: Option<String>,
     pub ppr: PPr,
     pub rpr: Style,
     /// 表格样式的边框和格子边距（tblPr）
     pub tbl: Option<TblPr>,
-    pub custom: bool,
     pub has_conditional: bool,
 }
 
@@ -866,9 +864,7 @@ impl Styles {
                     .and_then(wval)
                     .unwrap_or(id)
                     .to_string(),
-                kind: kind.clone(),
                 based_on: child(s, "basedOn").and_then(wval).map(str::to_string),
-                custom: matches!(wa(s, "customStyle"), Some("1" | "true")),
                 ..WStyle::default()
             };
             if let Some(p) = child(s, "pPr") {
@@ -981,7 +977,6 @@ pub struct Lvl {
     pub ind: Ind,
     pub rpr: Style,
     pub suff: Option<String>,
-    pub is_lgl: bool,
     pub font: Option<String>,
 }
 
@@ -1027,7 +1022,6 @@ impl Numbering {
                         .to_string(),
                     jc: child(l, "lvlJc").and_then(wval).map(str::to_string),
                     suff: child(l, "suff").and_then(wval).map(str::to_string),
-                    is_lgl: child(l, "isLgl").is_some_and(on_off),
                     ..Lvl::default()
                 };
                 if let Some(ind) = child(l, "pPr").and_then(|p| child(p, "ind")) {
