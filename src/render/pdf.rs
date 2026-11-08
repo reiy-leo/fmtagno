@@ -395,30 +395,7 @@ impl Markup<'_> {
             // 行间距交给行盒，leading 归零。
             // 基线上下各占多少按字体自己的 ascender/descender 分（Word 也是），
             // 不然像 MiSans 这种下沉较深的字体，字在行盒里会偏上
-            let (asc, desc) = edge_metrics(s);
-            let edges = match l {
-                LineHeight::Multiple(x) => {
-                    let half = ((x - asc - desc) / 2.0).max(0.0);
-                    format!(
-                        "top-edge: {:.3}em, bottom-edge: -{:.3}em",
-                        asc + half,
-                        desc + half
-                    )
-                }
-                // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）。
-                // 写成「行高一半 ± (asc-desc)/2 em」，格子里单独改了字号也还是这个行高
-                LineHeight::Exact(x) => {
-                    let (h, c) = (x.pt(fs, 0.0) / 2.0, (asc - desc) / 2.0);
-                    format!("top-edge: {h:.2}pt + {c:.3}em, bottom-edge: -{h:.2}pt + {c:.3}em")
-                }
-                LineHeight::AtLeast(x) => {
-                    let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
-                    format!(
-                        "top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt"
-                    )
-                }
-            };
-            let _ = writeln!(sets, "#set text({edges})");
+            let _ = writeln!(sets, "#set text({})", line_edges(s, l, fs));
             par.push("leading: 0pt".into());
         }
         if changed!(align) {
@@ -863,6 +840,12 @@ impl Markup<'_> {
                 let mut sets = self.text_args(&cs, s, &n.id);
                 if !sets.is_empty() {
                     sets = format!("#set text({sets})\n");
+                }
+                // 格子自己的行高（比如表头的 lineHeight）
+                if let Some(l) = cs.line_height
+                    && (s.line_height != cs.line_height || s.font_size != cs.font_size)
+                {
+                    let _ = writeln!(sets, "#set text({})", line_edges(&cs, l, cs.size_pt()));
                 }
                 if let Some(a) = cs.align.filter(|a| s.align != Some(*a)) {
                     let a = match a {
@@ -1400,5 +1383,32 @@ impl World for FmtagnoWorld {
 
     fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
         None
+    }
+}
+
+/// 行高落到 Typst 的 top-edge/bottom-edge 上。
+fn line_edges(s: &Style, l: LineHeight, fs: f32) -> String {
+    let (asc, desc) = edge_metrics(s);
+    match l {
+        LineHeight::Multiple(x) => {
+            let half = ((x - asc - desc) / 2.0).max(0.0);
+            format!(
+                "top-edge: {:.3}em, bottom-edge: -{:.3}em",
+                asc + half,
+                desc + half
+            )
+        }
+        // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）。
+        // 写成「行高一半 ± (asc-desc)/2 em」，格子里单独改了字号也还是这个行高
+        LineHeight::Exact(x) => {
+            let (h, c) = (x.pt(fs, 0.0) / 2.0, (asc - desc) / 2.0);
+            format!("top-edge: {h:.2}pt + {c:.3}em, bottom-edge: -{h:.2}pt + {c:.3}em")
+        }
+        LineHeight::AtLeast(x) => {
+            let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
+            format!(
+                "top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt"
+            )
+        }
     }
 }
