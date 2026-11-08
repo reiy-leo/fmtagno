@@ -11,9 +11,12 @@ fn has(bytes: &[u8], needle: &str) -> bool {
 fn dir() -> PathBuf {
     let dir = std::env::temp_dir().join("fmtagno-cells-test");
     std::fs::create_dir_all(&dir).unwrap();
+    // 几个测试并行跑，都会写这张图：先写到各自的临时文件再改名，免得别的测试读到写了一半的图
+    let tmp = dir.join(format!("logo-{:?}.png", std::thread::current().id()).replace(['(', ')'], ""));
     image::RgbImage::from_pixel(4, 2, image::Rgb([30, 160, 60]))
-        .save(dir.join("logo.png"))
+        .save(&tmp)
         .unwrap();
+    std::fs::rename(&tmp, dir.join("logo.png")).unwrap();
     dir
 }
 
