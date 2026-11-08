@@ -347,7 +347,10 @@ pub fn auto_natural(n: &Node, p: &TableProps, g: &Grid, ws: &[ColWidth], pad_pt:
                     let mut cs = s.inherited();
                     cs.merge(&part);
                     let side = |e| part.padding_side(e).unwrap_or(pad_pt);
-                    estimate_text_width(g.slot(r, c).text(), &cs) + side(Edge::Left) + side(Edge::Right) + 3.0
+                    estimate_text_width(g.slot(r, c).text(), &cs)
+                        + side(Edge::Left)
+                        + side(Edge::Right)
+                        + 3.0
                 })
                 .fold(0.0, f32::max)
         })
@@ -359,12 +362,18 @@ pub fn auto_natural(n: &Node, p: &TableProps, g: &Grid, ws: &[ColWidth], pad_pt:
 /// 比这宽就变成 1fr。这样比例列不会被长内容挤没。没有混写时原样返回。
 /// `avail` 是表格可用总宽（pt）。三种格式用同一个结果，排出来的列宽一致。
 pub fn resolve_auto(ws: &[ColWidth], natural: &[f32], avail: f32) -> Vec<ColWidth> {
-    let ratio: f32 = ws.iter().map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 }).sum();
+    let ratio: f32 = ws
+        .iter()
+        .map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 })
+        .sum();
     let autos = ws.iter().filter(|w| **w == ColWidth::Auto).count();
     if ratio <= 0.0 || autos == 0 {
         return ws.to_vec();
     }
-    let fixed: f32 = ws.iter().map(|w| if let ColWidth::Fixed(x) = w { *x } else { 0.0 }).sum();
+    let fixed: f32 = ws
+        .iter()
+        .map(|w| if let ColWidth::Fixed(x) = w { *x } else { 0.0 })
+        .sum();
     let share = ((avail - fixed) / (ratio + autos as f32)).max(0.0);
     ws.iter()
         .zip(natural)

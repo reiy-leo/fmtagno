@@ -275,7 +275,11 @@ impl Markup<'_> {
         let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
         self.margins = [mt, mr, mb, ml + gutter];
         let cols = page.columns.as_ref().map_or(1, |c| c.count());
-        let gap = page.columns.as_ref().filter(|c| c.count() > 1).map_or(0.0, |c| c.gap_pt());
+        let gap = page
+            .columns
+            .as_ref()
+            .filter(|c| c.count() > 1)
+            .map_or(0.0, |c| c.gap_pt());
         self.content_width = ((w - ml - mr - gutter) - gap * (cols as f32 - 1.0)) / cols as f32;
         let (hd, fd) = page.hf_distance_pt();
         let header = self.hf_src(&lay.header, lay, parent, true, hd);
