@@ -396,21 +396,29 @@ impl Markup<'_> {
             // 基线上下各占多少按字体自己的 ascender/descender 分（Word 也是），
             // 不然像 MiSans 这种下沉较深的字体，字在行盒里会偏上
             let (asc, desc) = edge_metrics(s);
-            let half = match l {
-                LineHeight::Multiple(x) => format!("{:.3}em", ((x - asc - desc) / 2.0).max(0.0)),
-                // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）
-                LineHeight::Exact(x) => {
-                    format!("{:.2}pt", (x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0)
+            let edges = match l {
+                LineHeight::Multiple(x) => {
+                    let half = ((x - asc - desc) / 2.0).max(0.0);
+                    format!(
+                        "top-edge: {:.3}em, bottom-edge: -{:.3}em",
+                        asc + half,
+                        desc + half
+                    )
                 }
-                LineHeight::AtLeast(x) => format!(
-                    "{:.2}pt",
-                    ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0)
-                ),
+                // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）。
+                // 写成「行高一半 ± (asc-desc)/2 em」，格子里单独改了字号也还是这个行高
+                LineHeight::Exact(x) => {
+                    let (h, c) = (x.pt(fs, 0.0) / 2.0, (asc - desc) / 2.0);
+                    format!("top-edge: {h:.2}pt + {c:.3}em, bottom-edge: -{h:.2}pt + {c:.3}em")
+                }
+                LineHeight::AtLeast(x) => {
+                    let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
+                    format!(
+                        "top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt"
+                    )
+                }
             };
-            let _ = writeln!(
-                sets,
-                "#set text(top-edge: {asc:.3}em + {half}, bottom-edge: -{desc:.3}em - {half})"
-            );
+            let _ = writeln!(sets, "#set text({edges})");
             par.push("leading: 0pt".into());
         }
         if changed!(align) {
