@@ -144,6 +144,7 @@ pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<Str
         warn: Warn::default(),
         opts,
         margins: [0.0; 4],
+        content_width: 0.0,
     };
     m.preamble(doc);
     let base = Style::default();
@@ -162,6 +163,8 @@ struct Markup<'a> {
     opts: &'a Options,
     /// 上右下左页边距，pt
     margins: [f32; 4],
+    /// 当前节版心（一栏）的宽度，pt；auto 列和比例列混写时用来分宽度
+    content_width: f32,
 }
 
 impl Markup<'_> {
@@ -272,6 +275,8 @@ impl Markup<'_> {
         let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
         self.margins = [mt, mr, mb, ml + gutter];
         let cols = page.columns.as_ref().map_or(1, |c| c.count());
+        let gap = page.columns.as_ref().filter(|c| c.count() > 1).map_or(0.0, |c| c.gap_pt());
+        self.content_width = ((w - ml - mr - gutter) - gap * (cols as f32 - 1.0)) / cols as f32;
         let (hd, fd) = page.hf_distance_pt();
         let header = self.hf_src(&lay.header, lay, parent, true, hd);
         let footer = self.hf_src(&lay.footer, lay, parent, false, fd);
@@ -806,7 +811,18 @@ impl Markup<'_> {
     fn table(&mut self, n: &Node, p: &TableProps, parent: &Style) {
         let g = Grid::of(p);
         let s = &n.style;
-        let widths: Vec<String> = common::col_widths(p, &g, &mut self.warn, &n.id)
+        let pad = s
+            .cell_padding
+            .map(|x| x.pt(s.size_pt(), 0.0))
+            .unwrap_or(4.0);
+        let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let avail = match s.width {
+            Some(Len::Pct(x)) => self.content_width * x / 100.0,
+            Some(w) => w.abs_pt(),
+            None => self.content_width,
+        };
+        let nat = common::auto_natural(n, p, &g, &ws, pad);
+        let widths: Vec<String> = common::resolve_auto(&ws, &nat, avail)
             .iter()
             .map(|w| match w {
                 ColWidth::Ratio(x) => format!("{x}fr"),
@@ -814,10 +830,6 @@ impl Markup<'_> {
                 ColWidth::Auto => "auto".to_string(),
             })
             .collect();
-        let pad = s
-            .cell_padding
-            .map(|x| x.pt(s.size_pt(), 0.0))
-            .unwrap_or(4.0);
         let mut header = Vec::new();
         let mut body = Vec::new();
         g.warn_ragged(&mut self.warn, &n.id);

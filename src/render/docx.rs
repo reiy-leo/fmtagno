@@ -759,27 +759,14 @@ impl Ctx<'_> {
             .unwrap_or(4.0);
         let pad = units::twip(pad_pt);
         let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let nat = common::auto_natural(n, p, &g, &ws, pad_pt);
+        let ws = common::resolve_auto(&ws, &nat, width_pt);
         let fills = common::fills_width(&ws);
         // auto 列按最宽的格子估一个初始宽度，Word 打开时按 autofit 自己再排
-        let auto_pt: Vec<f32> = (0..g.cols)
-            .map(|c| {
-                if ws[c] != ColWidth::Auto {
-                    return 0.0;
-                }
-                (0..g.rows)
-                    .filter(|r| g.is_origin(*r, c) && g.slot(*r, c).col_span == 1)
-                    .map(|r| {
-                        let part = common::cell_parts(n, &p.look, &g, r, c);
-                        let mut cs = s.inherited();
-                        cs.merge(&part);
-                        let side = |e| part.padding_side(e).unwrap_or(pad_pt);
-                        common::estimate_text_width(g.slot(r, c).text(), &cs)
-                            + side(Edge::Left)
-                            + side(Edge::Right)
-                            + 3.0
-                    })
-                    .fold(0.0, f32::max)
-            })
+        let auto_pt: Vec<f32> = ws
+            .iter()
+            .zip(&nat)
+            .map(|(w, a)| if *w == ColWidth::Auto { *a } else { 0.0 })
             .collect();
         let fixed_sum: f32 = ws
             .iter()

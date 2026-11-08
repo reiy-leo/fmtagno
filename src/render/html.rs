@@ -27,6 +27,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         warn: Warn::default(),
         opts,
         sec_css: String::new(),
+        content_width: 0.0,
     };
     let lang = doc.meta.lang.as_deref().unwrap_or("zh-CN");
     let title = doc.meta.title.as_deref().unwrap_or("fmtagno");
@@ -38,6 +39,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
     }
     let [mt, mr, mb, ml] = page.margins_pt();
     let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
+    r.content_width = w - ml - mr - gutter;
     let _ = write!(
         r.out,
         "<!doctype html>\n<html lang=\"{}\">\n<head>\n<meta charset=\"utf-8\">\n\
@@ -223,6 +225,8 @@ struct Html<'a> {
     opts: &'a Options,
     /// 各节的 @page 和分栏规则，最后填进 <style>
     sec_css: String,
+    /// 版心宽度，pt；auto 列和比例列混写时用来分宽度
+    content_width: f32,
 }
 
 impl Html<'_> {
@@ -509,6 +513,17 @@ impl Html<'_> {
         ts.padding = None;
         let mut css = self.css(&ts, parent, &n.id, Ctx::Table);
         let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let pad_pt = s
+            .cell_padding
+            .map(|x| x.pt(s.size_pt(), 0.0))
+            .unwrap_or(4.0);
+        let avail = match s.width {
+            Some(Len::Pct(x)) => self.content_width * x / 100.0,
+            Some(w) => w.abs_pt(),
+            None => self.content_width,
+        };
+        let nat = common::auto_natural(n, p, &g, &ws, pad_pt);
+        let ws = common::resolve_auto(&ws, &nat, avail);
         let has_auto = ws.contains(&ColWidth::Auto);
         if s.width.is_none() && common::fills_width(&ws) {
             css.push_str("width:100%;");
