@@ -722,7 +722,8 @@ impl PPr {
                         LineHeight::AtLeast(pt(v))
                     }
                 }
-                _ => LineHeight::Multiple(round2(line / 240.0)),
+                // Word 的多倍行距是乘字体自己的单倍行高，原样读成 { multiple }
+                _ => LineHeight::FontMultiple(round2(line / 240.0)),
             });
         }
         self.ind.apply(&mut s);

@@ -1683,6 +1683,13 @@ impl Ctx<'_> {
                     .line_rule(LineSpacingType::Exact);
                 any = true;
             }
+            // Word 自己的多倍行距：line 是倍数 × 240
+            Some(LineHeight::FontMultiple(x)) => {
+                ls = ls
+                    .line((x * 240.0).round().max(1.0) as i32)
+                    .line_rule(LineSpacingType::Auto);
+                any = true;
+            }
             Some(LineHeight::AtLeast(l)) => {
                 ls = ls
                     .line(units::twip(l.pt(fs, 0.0)))

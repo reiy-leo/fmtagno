@@ -1689,6 +1689,11 @@ impl World for FmtagnoWorld {
 /// 行高落到 Typst 的 top-edge/bottom-edge 上。
 fn line_edges(s: &Style, l: LineHeight, fs: f32) -> String {
     let (asc, desc) = edge_metrics(s);
+    // Word 的多倍行距先按字体度量换成字号的倍数，再像倍数行高那样分到上下
+    let l = match l {
+        LineHeight::FontMultiple(x) => LineHeight::Multiple(x * word_line_em(s)),
+        l => l,
+    };
     match l {
         LineHeight::Multiple(x) => {
             let half = ((x - asc - desc) / 2.0).max(0.0);
@@ -1708,5 +1713,56 @@ fn line_edges(s: &Style, l: LineHeight, fs: f32) -> String {
             let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
             format!("top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt")
         }
+        LineHeight::FontMultiple(_) => unreachable!(),
     }
+}
+
+/// 一种字体在 Word 里的单倍行高，字号的倍数。Word（Windows）按 GDI 的 TEXTMETRIC 算：
+/// tmHeight + tmExternalLeading，也就是
+/// usWinAscent + usWinDescent + max(0, (hhea.ascender − hhea.descender + hhea.lineGap) − (usWinAscent + usWinDescent))，
+/// 再除以 unitsPerEm（见 OpenType 规范 recom「Baseline to Baseline Distances」）。没有 OS/2 表时用 hhea。
+pub fn font_line_em(face: &ttf_parser::Face) -> Option<f32> {
+    let u = face.units_per_em() as f32;
+    if u <= 0.0 {
+        return None;
+    }
+    let hhea = face.tables().hhea;
+    let mac = hhea.ascender as f32 - hhea.descender as f32 + hhea.line_gap as f32;
+    let h = match face.tables().os2 {
+        Some(os2) => {
+            let win = os2.windows_ascender() as f32 + os2.windows_descender() as f32;
+            win + (mac - win).max(0.0)
+        }
+        None => mac,
+    };
+    (h > 0.0).then_some(h / u)
+}
+
+/// 样式用的字体在 Word 里的单倍行高（字号的倍数）。西文、中文字体都写了时取大的那个，
+/// 跟 Word 一样按一行里最高的字体算；一个都找不到就用默认字体列表里第一个找得到的。
+pub fn word_line_em(s: &Style) -> f32 {
+    let store = font_store();
+    let first = |list: &str| -> Option<f32> {
+        list.split(',')
+            .map(str::trim)
+            .filter(|y| !y.is_empty())
+            .find_map(|fam| {
+                let i = store
+                    .book()
+                    .select(&fam.to_lowercase(), FontVariant::default())?;
+                let font = store.font(i)?;
+                let face = ttf_parser::Face::parse(font.data(), font.index()).ok()?;
+                font_line_em(&face)
+            })
+    };
+    let mut best: Option<f32> = None;
+    if let Some(f) = &s.font_family {
+        for g in f.fallback() {
+            if let Some(k) = first(g) {
+                best = Some(best.map_or(k, |b: f32| b.max(k)));
+            }
+        }
+    }
+    best.or_else(|| first(&FONTS.join(",")))
+        .unwrap_or(ASCENT + DESCENT)
 }

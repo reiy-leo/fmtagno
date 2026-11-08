@@ -481,8 +481,10 @@ value_type!(Wrap, "Wrap", { "anyOf": [{ "type": "boolean" }, { "enum": ["square"
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LineHeight {
-    /// 倍数
+    /// 倍数：字号 × 倍数（CSS 的 line-height 数字）
     Multiple(f32),
+    /// Word 的多倍行距（lineRule="auto"）：倍数 × 字体自己的单倍行高，JSON 写 `{ "multiple": 1.5 }`
+    FontMultiple(f32),
     /// 固定值
     Exact(Len),
     /// 最小值
@@ -501,8 +503,16 @@ impl LineHeight {
             Value::Object(m) if m.len() == 1 && m.contains_key("atLeast") => {
                 LineHeight::AtLeast(Len::from_value(&m["atLeast"])?)
             }
+            Value::Object(m) if m.len() == 1 && m.contains_key("multiple") => {
+                match m["multiple"].as_f64() {
+                    Some(x) if x > 0.0 => LineHeight::FontMultiple(x as f32),
+                    _ => bail!("lineHeight 的 multiple 要写正数，比如 {{ \"multiple\": 1.5 }}"),
+                }
+            }
             _ => {
-                bail!("lineHeight 写倍数（1.5）、固定值（\"20pt\"）或 {{ \"atLeast\": \"18pt\" }}")
+                bail!(
+                    "lineHeight 写倍数（1.5）、固定值（\"20pt\"）、{{ \"atLeast\": \"18pt\" }} 或 {{ \"multiple\": 1.5 }}"
+                )
             }
         })
     }
@@ -513,13 +523,15 @@ impl LineHeight {
             LineHeight::Exact(Len::Pt(v)) => format!("{v}pt").into(),
             LineHeight::Exact(l) => l.to_value(),
             LineHeight::AtLeast(l) => serde_json::json!({ "atLeast": l.to_value() }),
+            LineHeight::FontMultiple(x) => serde_json::json!({ "multiple": x }),
         }
     }
 }
 
 value_type!(LineHeight, "LineHeight", { "anyOf": [
     { "type": "number" }, { "type": "string" },
-    { "type": "object", "properties": { "atLeast": { "type": ["number", "string"] } }, "required": ["atLeast"], "additionalProperties": false }
+    { "type": "object", "properties": { "atLeast": { "type": ["number", "string"] } }, "required": ["atLeast"], "additionalProperties": false },
+    { "type": "object", "properties": { "multiple": { "type": "number", "exclusiveMinimum": 0 } }, "required": ["multiple"], "additionalProperties": false }
 ] });
 
 // ---------- 边框 ----------

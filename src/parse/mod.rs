@@ -873,6 +873,15 @@ impl Ctx {
                 format!("分节类型 `{t}` 没保留，按下一页分节处理"),
             );
         }
+        // 文档网格：行网格会把每行行高凑成 linePitch 的整数倍（段落没关 snapToGrid 时），这里不做
+        if let Some(t) = child(n, "docGrid").and_then(|g| wa(g, "type"))
+            && matches!(t, "lines" | "linesAndChars" | "snapToChars")
+        {
+            self.warns.once(
+                "docGrid",
+                format!("文档网格（docGrid type={t}）的行网格对齐没保留，行距可能比 Word 里紧"),
+            );
+        }
         if child(n, "vAlign")
             .and_then(wval)
             .is_some_and(|v| v != "top")

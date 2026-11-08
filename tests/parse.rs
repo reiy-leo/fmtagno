@@ -574,3 +574,48 @@ fn multi_row_repeat_header_keeps_first_row() {
     assert_eq!(c0.as_str().or(c0["text"].as_str()), Some("甲"), "{t}");
     assert_eq!(t["props"]["rows"].as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn word_auto_line_spacing_comes_back_as_multiple() {
+    let json = r#"{"root":"d","elements":{"d":{"type":"Document","children":["a","b"]},"a":{"type":"Text","props":{"text":"一"},"style":{"lineHeight":{"multiple":1.15}}},"b":{"type":"Text","props":{"text":"二"},"style":{"lineHeight":1.5}}}}"#;
+    let docx = to_docx(json);
+    let x = String::from_utf8_lossy(&docx).into_owned();
+    assert!(x.contains(r#"w:line="276" w:lineRule="auto""#));
+    let parsed = parse(&docx);
+    let text = serde_json::to_string(&parsed.json).unwrap();
+    assert!(text.contains(r#""lineHeight":{"multiple":1.15}"#), "{text}");
+    // fmtagno 自己的倍数（写成「至少」）还是读回数字
+    assert!(!text.contains(r#""lineHeight":{"multiple":1.5}"#), "{text}");
+    // 第二轮不变
+    let again = parse(
+        &fmtagno::render_str(&text, Format::Docx, None)
+            .unwrap()
+            .bytes,
+    );
+    assert_eq!(parsed.json["elements"], again.json["elements"]);
+}
+
+#[test]
+fn doc_grid_lines_warns() {
+    let json = r#"{"root":"d","elements":{"d":{"type":"Document","children":["a"]},"a":{"type":"Text","props":{"text":"一"}}}}"#;
+    let docx = edit_document(&to_docx(json), |x| {
+        if x.contains("<w:docGrid ") {
+            x.replacen("<w:docGrid ", r#"<w:docGrid w:type="lines" "#, 1)
+        } else {
+            x.replacen(
+                "</w:sectPr>",
+                r#"<w:docGrid w:type="lines" w:linePitch="312" /></w:sectPr>"#,
+                1,
+            )
+        }
+    });
+    let parsed = parse(&docx);
+    assert!(
+        parsed.warnings.iter().any(|w| w.contains("docGrid")),
+        "{:?}",
+        parsed.warnings
+    );
+    // 没有 type 的 docGrid（Word 默认）不警告
+    let plain = parse(&to_docx(json));
+    assert!(!plain.warnings.iter().any(|w| w.contains("docGrid")));
+}

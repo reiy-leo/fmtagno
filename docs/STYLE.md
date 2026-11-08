@@ -71,7 +71,7 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `align` | `left` `center` `right` `justify` `distribute` | w:jc（start、center、end、both、distribute） | algn（l、ctr、r、just、dist） | horizontal | text-align | align / justify |
 | `spaceBefore` | 长度或 `"Nline"` | w:spacing before / beforeLines | a:spcBef | — | margin-top | block above |
 | `spaceAfter` | 同上 | w:spacing after / afterLines | a:spcAft | — | margin-bottom | block below |
-| `lineHeight` | 数字是倍数，按 CSS 算（字号 × 倍数）；长度是固定值；`{ atLeast: 长度 }` 是最小值 | w:spacing line + lineRule（倍数写成 atLeast 字号 × 倍数，不用 auto：Word 的 auto 乘的是字体自己的单倍行高，雅黑约 1.32 倍字号；固定值 exact；最小值 atLeast） | a:lnSpc（spcPct / spcPts） | — | line-height | par leading（近似） |
+| `lineHeight` | 数字是倍数，按 CSS 算（字号 × 倍数）；长度是固定值；`{ atLeast: 长度 }` 是最小值；`{ multiple: 倍数 }` 是 Word 的多倍行距（见下面「行距」） | w:spacing line + lineRule（数字写成 atLeast 字号 × 倍数；固定值 exact；最小值 atLeast；multiple 写 auto，line = 倍数 × 240） | a:lnSpc（spcPct / spcPts） | — | line-height（multiple 按字体换算成倍数） | top-edge / bottom-edge（multiple 按字体换算） |
 | `marginLeft` | 长度，整段左缩进 | w:ind start（`em` 时加 leftChars） | marL | indent（按字符数，只有整数） | margin-left | pad |
 | `marginRight` | 长度，整段右缩进 | w:ind end（`em` 时加 rightChars） | — | — | margin-right | pad |
 | `textIndent` | 长度，首行缩进 | w:ind firstLine（`em` 时用 firstLineChars） | indent（正数） | — | text-indent | first-line-indent |
@@ -86,6 +86,37 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `direction` | `ltr` `rtl` | w:bidi | rtl | readingOrder | direction | dir |
 | `wrap` | 布尔：自动换行 | — | a:bodyPr wrap | wrapText | white-space | — |
 | `outlineLevel` | 1–9 | w:outlineLvl | — | — | — | — |
+
+### 行距
+
+`lineHeight` 有四种写法，数字和 `{ multiple }` 都叫「倍数」，但乘的东西不一样：
+
+| 写法 | 一行多高 | 什么时候用 |
+|---|---|---|
+| `1.5` | 字号 × 1.5，跟 CSS 一样 | 默认用这个，三种格式行高一致 |
+| `"20pt"` | 固定 20pt | 要精确对齐时 |
+| `{ "atLeast": "18pt" }` | 至少 18pt，字大了会撑高 | 混排大字、图片时 |
+| `{ "multiple": 1.5 }` | 字体自己的单倍行高 × 1.5，跟 Word 的「多倍行距」一样 | 要和 Word 做的文档对上时，`fmtagno parse` 读出来的就是这种 |
+
+字体的单倍行高不是字号，是字体文件里定的。Word（Windows）按 GDI 的 TEXTMETRIC 算：
+
+```
+单倍行高 = usWinAscent + usWinDescent
+         + max(0, (hhea.ascender − hhea.descender + hhea.lineGap) − (usWinAscent + usWinDescent))
+再除以 unitsPerEm，得到字号的倍数
+```
+
+usWinAscent、usWinDescent 在 OS/2 表里，hhea 是水平排版的表头；后半截是 GDI 的 tmExternalLeading（见 OpenType 规范 Recommendations 一章的「Baseline to Baseline Distances」）。比如微软雅黑约 1.32 倍字号。所以 Word 里「1.5 倍行距」的雅黑段落，行高是字号的 1.98 倍左右，不是 1.5 倍。
+
+各格式的做法：
+
+- docx：直接写 `w:spacing w:line="倍数 × 240" w:lineRule="auto"`，Word 自己算。
+- pdf：用本机找到的字体按上面的公式算出单倍行高，乘倍数，多出来的高度对半分到字的上下。
+- html：同样算出来，写成 `line-height` 的数字（字号的倍数）。浏览器实际用的字体和生成时找到的不一样时，行高会有出入。
+- markdown：不管行距。
+- 一段里写了西文字体和中文字体时，取两种字体单倍行高里大的那个，跟 Word 按一行里最高的字体算一样。
+- 字体都找不到时按 1.17 倍字号算。
+- Word 文档开了文档网格（`w:docGrid` 的 type 是 lines、linesAndChars）时，Word 会把行高凑成网格行距的整数倍。fmtagno 不做网格对齐，parse 时给警告。
 
 ## 四、边框（对应 w:pBdr、w:tblBorders、w:tcBorders、a:ln、xlsx border）
 

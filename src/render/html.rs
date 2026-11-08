@@ -1270,6 +1270,11 @@ impl Html<'_> {
                 LineHeight::Multiple(x) => {
                     let _ = write!(o, "line-height:{x};");
                 }
+                // Word 的多倍行距：按字体度量换成 CSS 倍数（字号的几倍）
+                LineHeight::FontMultiple(x) => {
+                    let k = x * super::pdf::word_line_em(s);
+                    let _ = write!(o, "line-height:{};", (k * 1000.0).round() / 1000.0);
+                }
                 LineHeight::Exact(x) | LineHeight::AtLeast(x) => {
                     let _ = write!(o, "line-height:{};", len_css(x));
                 }

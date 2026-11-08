@@ -166,3 +166,56 @@ fn word_border_styles_map_through() {
         assert!(has(&out.bytes, &format!("w:val=\"{v}\"")), "缺 {v}");
     }
 }
+
+/// `{ "multiple": x }` 是 Word 的多倍行距：docx 原样写 line = x × 240、lineRule auto；
+/// html、pdf 按字体的单倍行高换算。数字 lineHeight 还是 CSS 的意思。
+#[test]
+fn line_height_font_multiple_is_word_auto() {
+    let json = r#"{
+      "version": "0.1",
+      "root": "doc",
+      "elements": {
+        "doc": { "type": "Document", "children": ["a", "b"] },
+        "a": { "type": "Text", "props": { "text": "多倍" }, "style": { "fontSize": 10, "lineHeight": { "multiple": 1.5 } } },
+        "b": { "type": "Text", "props": { "text": "倍数" }, "style": { "fontSize": 10, "lineHeight": 1.5 } }
+      }
+    }"#;
+    let out = fmtagno::render_str(json, Format::Docx, None).unwrap();
+    let b = &out.bytes;
+    assert!(has(b, r#"w:line="360" w:lineRule="auto""#));
+    assert!(has(b, r#"w:line="300" w:lineRule="atLeast""#));
+    // html：1.5 × 字体单倍行高（字号的倍数）
+    let k = 1.5 * fmtagno::render::pdf::word_line_em(&Default::default());
+    assert!(k > 1.5, "单倍行高应该比字号大：{k}");
+    let h = fmtagno::render_str(json, Format::Html, None).unwrap();
+    let h = String::from_utf8(h.bytes).unwrap();
+    let want = format!("line-height:{};", (k * 1000.0).round() / 1000.0);
+    assert!(h.contains(&want), "{want}");
+    assert!(h.contains("line-height:1.5;"));
+    // 写错了要报错
+    let bad = json.replace(r#"{ "multiple": 1.5 }"#, r#"{ "multiple": 0 }"#);
+    assert!(fmtagno::render_str(&bad, Format::Docx, None).is_err());
+}
+
+/// Word 单倍行高的算法：usWinAscent + usWinDescent，再加上 hhea 行距超出的部分。
+#[test]
+fn word_single_line_uses_win_metrics() {
+    let mut checked = 0;
+    for (font, _) in typst_kit::fonts::embedded() {
+        let Ok(face) = ttf_parser::Face::parse(font.data(), font.index()) else {
+            continue;
+        };
+        let (Some(os2), hhea) = (face.tables().os2, face.tables().hhea) else {
+            continue;
+        };
+        let u = face.units_per_em() as f32;
+        let win = os2.windows_ascender() as f32 + os2.windows_descender() as f32;
+        let mac = hhea.ascender as f32 - hhea.descender as f32 + hhea.line_gap as f32;
+        let want = (win + (mac - win).max(0.0)) / u;
+        let got = fmtagno::render::pdf::font_line_em(&face).unwrap();
+        assert!((got - want).abs() < 1e-6);
+        assert!(got >= win / u);
+        checked += 1;
+    }
+    assert!(checked > 0);
+}
