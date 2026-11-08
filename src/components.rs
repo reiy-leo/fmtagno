@@ -152,6 +152,15 @@ impl Inline {
         })
     }
 
+    /// 最后一段看得见的文字以换行结尾。Word 里末尾的换行后面还有一行空行，
+    /// PDF、HTML 要补一个零宽字符才会有这一行。
+    pub fn ends_with_break(&self) -> bool {
+        self.runs()
+            .filter(|r| r.computed.hidden != Some(true) && r.image.is_none() && !r.text.is_empty())
+            .last()
+            .is_some_and(|r| r.text.ends_with('\n'))
+    }
+
     /// 纯文字，给 alt、标题这类地方用。
     pub fn plain_text(&self) -> String {
         match self {

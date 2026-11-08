@@ -625,6 +625,9 @@ impl Markup<'_> {
         for r in t.runs() {
             out.push_str(&self.run(r, para));
         }
+        if t.ends_with_break() {
+            out.push_str("#\"\u{200B}\"");
+        }
         out
     }
 
@@ -633,6 +636,9 @@ impl Markup<'_> {
         let mut out = String::new();
         for r in common::rebase_runs(t, old, new) {
             out.push_str(&self.run(&r, new));
+        }
+        if t.ends_with_break() {
+            out.push_str("#\"\u{200B}\"");
         }
         out
     }

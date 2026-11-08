@@ -755,6 +755,9 @@ impl Html<'_> {
         for r in t.runs() {
             self.run(r, &base, id);
         }
+        if t.ends_with_break() {
+            self.out.push('\u{200B}');
+        }
     }
 
     /// 文字换了样式环境（格子、列表项）：run 样式按新环境重算后再写。
@@ -762,6 +765,9 @@ impl Html<'_> {
         let base = new.text_only();
         for r in common::rebase_runs(t, old, new) {
             self.run(&r, &base, id);
+        }
+        if t.ends_with_break() {
+            self.out.push('\u{200B}');
         }
     }
 
