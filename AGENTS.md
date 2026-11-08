@@ -23,6 +23,7 @@ src/lib.rs          库入口，render_str 给命令行和 MCP 共用
 src/doc.rs          文档模型、校验、建元素树
 src/components.rs   内置组件的 props 和 schema
 src/style.rs        样式字段和取值解析
+src/math.rs         公式：LaTeX 经 math-core 转 MathML，再转成 OMML（docx）和 Typst 公式（pdf）
 src/cascade.rs      样式层叠：样式集、组件样式、部位、继承
 src/custom.rs       自定义组件：定义、校验、展开
 src/render/         各格式渲染器：html、docx、pdf（Typst）、markdown；common.rs 放列表编号、表格部位这类共用计算

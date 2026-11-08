@@ -19,6 +19,37 @@ impl Warn {
     pub fn push(&mut self, msg: String) {
         self.list.push(msg);
     }
+    /// 同一个 key 只报一次。
+    pub fn once(&mut self, key: &str, msg: String) {
+        if self.seen.insert(key.to_string()) {
+            self.list.push(msg);
+        }
+    }
+
+    /// 公式转不了：同一个元素里的同一个公式只报一次。
+    pub fn math_failed(&mut self, format: &str, id: &str, latex: &str, why: &str) {
+        self.once(
+            &format!("math:{format}:{id}:{latex}"),
+            format!(
+                "{format}：元素 `{id}` 里的公式 `{latex}` 转不了（{why}），改成显示 LaTeX 原文"
+            ),
+        );
+    }
+
+    /// 公式里有认不出的结构，退成了纯文字。
+    pub fn math_partial(&mut self, format: &str, id: &str, latex: &str, tags: &[String]) {
+        if tags.is_empty() {
+            return;
+        }
+        self.once(
+            &format!("mathpart:{format}:{id}:{latex}"),
+            format!(
+                "{format}：元素 `{id}` 里的公式 `{latex}` 有 {} 排不了，这部分改成纯文字",
+                tags.join("、")
+            ),
+        );
+    }
+
     /// 某个格式不支持某个字段：每个字段只报一次。
     pub fn unsupported(&mut self, format: &str, field: &str, id: &str) {
         let key = format!("{format}:{field}");

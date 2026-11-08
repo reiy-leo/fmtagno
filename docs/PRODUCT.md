@@ -12,7 +12,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。
 ## 第一版（v0.1）
 
 - 格式：docx、pdf、html，外加 Markdown（GFM，只留结构不留样式，有合并格的表格写成内嵌 HTML，提示框写成 `> [!NOTE]`）。
-- 内置组件：Heading、Text、Code、List、Table、Image、PageBreak、Divider（分割线）、Quote（引用）、Callout（提示框）、TableOfContents（目录）、Slide、Section（分节），外加根组件 Document；行内有 InlineCode（写在 runs 里）。
+- 内置组件：Heading、Text、Code、Math（块级公式）、List、Table、Image、PageBreak、Divider（分割线）、Quote（引用）、Callout（提示框）、TableOfContents（目录）、Slide、Section（分节），外加根组件 Document；行内有 InlineCode 和 InlineMath（行内公式），都写在 runs 里。
 - 命令行：
   - `fmtagno render doc.json -o out.docx`：按输出文件的扩展名选格式。
   - `fmtagno check doc.json`：只校验，不出文件。
@@ -58,7 +58,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。
 - `parts`：部位样式，比如表格的 `header`、`evenRow`、`lastRow`，列表的 `level2`、`marker`。
 - `children`：子元素 id 列表，只有容器组件（Document、Slide、Section）能用。每个元素只能被引用一次。
 
-文字类的 props（Heading 的 `text`、Text 的 `text`、List 的每一项、表格的每一格）都能写成纯字符串，也能写成 runs 数组。数组里可以直接写字符串，也可以写对象：`bold`、`italic`、`underline`、`color`、`href` 是简写，`style` 能写全部文字样式；`"type": "InlineCode"` 表示行内代码。列表项可以写成 `{ "text": …, "items": [...] }` 带子列表。
+文字类的 props（Heading 的 `text`、Text 的 `text`、List 的每一项、表格的每一格）都能写成纯字符串，也能写成 runs 数组。数组里可以直接写字符串，也可以写对象：`bold`、`italic`、`underline`、`color`、`href` 是简写，`style` 能写全部文字样式；`"type": "InlineCode"` 表示行内代码，`"type": "InlineMath"` 表示行内公式（text 写 LaTeX）。块级公式用 Math 组件，写法见 [STYLE.md](STYLE.md) 第十四节。列表项可以写成 `{ "text": …, "items": [...] }` 带子列表。
 
 `meta.page` 管纸张：`size`（默认 A4，也可以写 `{ "width", "height" }`）、`landscape`、`margin` 和四个单边、`gutter`、`columns`，还有页眉页脚 `header`、`footer` 和页码起始 `pageNumberStart`。要分节就在 root 下面放 `Section`，每节能单独改这些设置；runs 里写 `{ "field": "page" }` 显示页码。细节见 [STYLE.md](STYLE.md) 第十节。
 
@@ -82,6 +82,14 @@ pdf 用 Typst 排版，有这些不同：
 - 中文字体没有斜体，`italic` 对中文不起作用。
 - 支持 SVG；远程图片暂不支持，改成显示 alt 文字。
 - 颜色只认十六进制写法，比如 `#c00`、`#1a73e8`。
+
+公式在四种格式里的写法（细节见 STYLE.md 第十四节）：
+
+- docx 写成 Word 自己的公式（OMML），在 Word 里能直接改。带编号的块级公式用制表位排，公式按行内大小显示。
+- pdf 交给 Typst 排，字体用 Typst 自带的 New Computer Modern Math。
+- html 写成 MathML，不用脚本也不连网。括号拉伸、大号求和符号要靠系统里的公式字体（macOS、Windows 自带；Linux 可能要装）。
+- Markdown 写成 `$…$` 和 `$$…$$`，GitHub 能显示。
+- LaTeX 写错了不会让整个文件出不来：给一条警告，这个公式改成显示 LaTeX 原文。
 
 html 默认是一长条网页，分页和表头重复只在打印时出现。加 `--paged` 会把 Paged.js（MIT，0.4.3，已打包进二进制，离线能用）嵌进页面，打开就像 Google Docs 那样一页页显示：
 
@@ -153,9 +161,12 @@ html 默认是一长条网页，分页和表头重复只在打印时出现。加
 | MCP | rmcp | 3.8.0 |
 | 命令行 | clap | 4.6.7 |
 | JSON Schema | schemars | 1.2.3 |
+| LaTeX 转 MathML | math-core | 0.9.0（2026-11-09 核对） |
+| 读 MathML | roxmltree | 0.21 |
 
 - PDF 走 Typst：先把文档转成 Typst 源码，再编译成 PDF。中文排版好，不用装 LibreOffice。字体要打包进二进制，或者读系统字体。
 - HTML 自己拼字符串，不引模板引擎。
+- 公式只用一个解析器：math-core（MIT）把 LaTeX 转成 MathML，html 直接用；docx 和 pdf 再从 MathML 转成 OMML 和 Typst 公式，这两步是自己写的。没用 mitex（LaTeX 转 Typst）：它转出来的东西要配 mitex 的 Typst 包才能排，离线用不了，而且 2024 年以后没再更新。
 - 只支持 JSON，不支持 YAML（Rei 2026-10-28 定）：AI 生成 JSON 最稳，也少一个依赖。
 
 ## 发布

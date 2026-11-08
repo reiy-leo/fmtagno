@@ -387,7 +387,7 @@ runs 里写 `{ "field": "page" }` 是当前页码，`"pages"` 是全文总页数
 5. 自定义组件模板里写的 `style`（内层模板在前，外层模板给实例写的在后）。
 6. 指名这个自定义组件的组件样式：`PriceTable`（只管模板根元素）和 `PriceTable:t`（管模板里的元素 `t`）。
 7. 元素自己的 `style`：样式名、样式名数组、样式对象，后面的覆盖前面的。样式名先在当前样式集的 `styles` 里找，找不到再到顶层 `styles` 找。
-8. runs 上的文字字段：先是元素的文字样式，行内代码再叠 `InlineCode` 组件样式，链接默认蓝色加下划线，然后是 `bold` 这类简写，最后是 run 自己的 `style`。
+8. runs 上的文字字段：先是元素的文字样式，行内代码再叠 `InlineCode` 组件样式，行内公式叠 `InlineMath` 组件样式，链接默认蓝色加下划线，然后是 `bold` 这类简写，最后是 run 自己的 `style`。
 
 几点说明：
 
@@ -592,3 +592,47 @@ docx 里各部位的样式现在逐格写成直接格式。docx-rs 还不支持 
 - 内置默认样式给它们一套等宽字体回退：macOS 用 Menlo，Windows 用 Consolas，Linux 用 DejaVu Sans Mono。
 - InlineCode 只能放文字类 props（Text、Heading、List 项、表格格子），不能单独当元素用。
 - `language` 第一版只写进 HTML 的 `class="language-rust"`，以后再考虑高亮。
+
+## 十四、公式：InlineMath 和 Math
+
+公式写 LaTeX，和代码一样分行内、块级两种：
+
+- **InlineMath**：行内公式，写在文字的 runs 里，`text` 是 LaTeX 源码，不用写 `$`。
+- **Math**：块级公式，单独一行，默认居中。`latex` 是源码，不用写 `$$`；`number` 可选，写了就在右边显示「(1)」这样的编号。
+
+```json
+{
+  "intro": {
+    "type": "Text",
+    "props": {
+      "text": ["勾股定理 ", { "type": "InlineMath", "text": "a^2+b^2=c^2" }, "。"]
+    }
+  },
+  "root-formula": {
+    "type": "Math",
+    "props": { "latex": "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}", "number": 1 },
+    "style": { "fontSize": 12 }
+  }
+}
+```
+
+- JSON 里反斜杠要写两个：`\\frac` 才是 LaTeX 的 `\frac`。
+- 样式照常层叠：Math 内置 `align: center`、`spaceBefore: 6`、`spaceAfter: 6`，`fontSize`、`color`、`align` 都能改；行内公式跟着所在段落的文字样式走，也能单独设 `InlineMath` 组件样式。
+- `fmtagno check` 会把解析不了的公式列成警告。渲染时这种公式显示 LaTeX 原文，不会让整个文件出错。
+
+能用的写法以 [math-core](https://github.com/tmke8/math-core) 为准，常见的都行：上下标、`\frac`、`\sqrt`、`\sqrt[3]{}`、`\sum`、`\prod`、`\int` 带上下限、`\lim`、希腊字母、`\mathbf`、`\mathbb`、`\text`、`\left( \right)`、`pmatrix`/`bmatrix` 这类矩阵、`cases`、`\binom`、`\hat`/`\vec`/`\bar` 这类重音、`\overline`、`\underbrace`。
+
+| | Word | HTML | PDF | Markdown |
+|---|---|---|---|---|
+| InlineMath | 段落里的 `<m:oMath>`，夹在普通 run 中间 | `<math>`（MathML） | `$…$` | `$…$` |
+| Math | 一段里放 `<m:oMathPara>`，对齐写在 `m:jc` 上 | `<math display="block">` | `$display(…)$` | `$$` 单独成块，编号写成 `\tag{1}` |
+
+几个格式各自的情况：
+
+- **docx**：转成 Word 的公式（OMML），在 Word 里双击就能改。求和、积分是 `m:nary`，分数 `m:f`，根号 `m:rad`，矩阵 `m:m`，能拉伸的括号 `m:d`，重音 `m:acc`，上下划线 `m:bar`，上下大括号 `m:groupChr`，`\lim` 这类下面带字的是 `m:limLow`。公式字体用 Cambria Math，字号、颜色、粗体跟着样式。带编号的块级公式是一段里放居中、右对齐两个制表位，公式这时按行内大小排（分数会小一点）。行内公式不能带链接，写了 `href` 也不加。
+- **pdf**：转成 Typst 公式，字体用 Typst 自带的 New Computer Modern Math，`\text{}` 里的中文往后找正文字体。万一转出来的源码 Typst 排不了，整份文档的公式改成显示 LaTeX 原文再排一次，并给警告。
+- **html**：MathML 直接写进页面，不用 MathJax 这类脚本，离线也能看。括号拉伸、大号求和符号要靠系统里的公式字体：macOS 有 STIX Two Math，Windows 有 Cambria Math，Linux 没装公式字体时会显示成普通大小。
+- **Markdown**：GitHub 的写法。表格格子里公式里的 `|` 没有转义，会把格子拆开，写绝对值时用 `\lvert x \rvert`。
+
+docx 和 pdf 认不出的结构（比如左上下标）退成纯文字，并给一次警告。
+

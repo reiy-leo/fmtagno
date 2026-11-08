@@ -135,8 +135,11 @@ fn main() -> Result<()> {
         Cmd::Check { input, defs } => {
             let text = read_input(&input)?;
             let env = defs.env(&input)?;
-            let (d, _) = fmtagno::prepare(&text, &env)
+            let (d, tree) = fmtagno::prepare(&text, &env)
                 .with_context(|| format!("{} 校验没通过", input.display()))?;
+            for w in fmtagno::check_math(&tree) {
+                eprintln!("警告：{w}");
+            }
             println!("ok：展开后 {} 个元素", d.elements.len());
             Ok(())
         }

@@ -5,6 +5,7 @@ pub mod cascade;
 pub mod components;
 pub mod custom;
 pub mod doc;
+pub mod math;
 pub mod render;
 pub mod style;
 pub mod units;
@@ -41,6 +42,39 @@ pub fn prepare(json: &str, env: &Env) -> Result<(doc::Doc, doc::Node)> {
     let sheet = cascade::Sheet::build(&d, &env.style_sets, env.style_set.as_deref())?;
     let tree = d.tree_with(&sheet)?;
     Ok((d, tree))
+}
+
+/// 检查文档里的公式（Math 组件和 runs 里的 InlineMath）能不能解析，返回警告。
+/// 解析不了的公式渲染时会改成显示 LaTeX 原文，不算错误。
+pub fn check_math(tree: &doc::Node) -> Vec<String> {
+    fn walk(n: &doc::Node, out: &mut Vec<String>) {
+        let mut c = n.component.clone();
+        let mut all: Vec<(String, bool)> = Vec::new();
+        if let components::Component::Math(p) = &c {
+            all.push((p.latex.clone(), true));
+        }
+        for t in c.inlines_mut() {
+            all.extend(
+                t.runs()
+                    .filter(|r| r.is_math())
+                    .map(|r| (r.text.clone(), false)),
+            );
+        }
+        for (latex, block) in all {
+            if let Err(e) = math::to_mathml(&latex, block) {
+                out.push(format!(
+                    "元素 `{}` 里的公式 `{latex}` 解析不了（{e}），渲染时会显示 LaTeX 原文",
+                    n.id
+                ));
+            }
+        }
+        for k in &n.children {
+            walk(k, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(tree, &mut out);
+    out
 }
 
 /// 从 JSON 文本直接渲染，命令行和 MCP 都走这里。

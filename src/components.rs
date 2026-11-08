@@ -6,10 +6,12 @@ use serde_json::Value;
 
 use crate::style::{Style, Underline};
 
-/// run 的种类：普通文字或行内代码。
+/// run 的种类：普通文字、行内代码或行内公式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum RunKind {
     InlineCode,
+    /// text 是 LaTeX 公式源码，不用写 `$`
+    InlineMath,
 }
 
 /// 域：渲染时才知道的值，Word 里是 PAGE、NUMPAGES、SECTIONPAGES。
@@ -34,7 +36,8 @@ pub struct Run {
     /// 页码这类域，写了就不用 text
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<Field>,
-    /// 写 "InlineCode" 表示行内代码，外观由 InlineCode 组件样式决定
+    /// 写 "InlineCode" 表示行内代码，外观由 InlineCode 组件样式决定；
+    /// 写 "InlineMath" 表示行内公式，text 是 LaTeX 源码
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<RunKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,6 +91,10 @@ impl Run {
 
     pub fn is_code(&self) -> bool {
         self.kind == Some(RunKind::InlineCode)
+    }
+
+    pub fn is_math(&self) -> bool {
+        self.kind == Some(RunKind::InlineMath)
     }
 }
 
@@ -203,6 +210,34 @@ pub struct CodeProps {
     pub language: Option<String>,
     #[serde(default)]
     pub line_numbers: bool,
+}
+
+/// 公式编号：写数字或文字，显示在公式右边的括号里。
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum EqNumber {
+    Int(u32),
+    Text(String),
+}
+
+impl std::fmt::Display for EqNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EqNumber::Int(n) => write!(f, "{n}"),
+            EqNumber::Text(t) => f.write_str(t),
+        }
+    }
+}
+
+/// 块级公式：单独一行、默认居中。
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MathProps {
+    /// LaTeX 公式源码，不用写 `$$`
+    pub latex: String,
+    /// 公式编号，比如 1 显示成「(1)」，靠右
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<EqNumber>,
 }
 
 /// 列表项：文字，或带子列表的 { text, items, ordered }。
@@ -599,6 +634,7 @@ pub enum Component {
     Heading(HeadingProps),
     Text(TextProps),
     Code(CodeProps),
+    Math(MathProps),
     List(ListProps),
     Table(TableProps),
     Image(ImageProps),
@@ -618,6 +654,7 @@ impl Component {
             Component::Heading(_) => "Heading",
             Component::Text(_) => "Text",
             Component::Code(_) => "Code",
+            Component::Math(_) => "Math",
             Component::List(_) => "List",
             Component::Table(_) => "Table",
             Component::Image(_) => "Image",
@@ -713,7 +750,7 @@ pub const BUILTINS: &[Spec] = &[
     },
     Spec {
         name: "Text",
-        description: "一段正文，可以是纯文本或富文本 runs（runs 里可以放 InlineCode）",
+        description: "一段正文，可以是纯文本或富文本 runs（runs 里可以放 InlineCode、InlineMath）",
         container: false,
         parts: &[],
         schema: || schema_for!(TextProps),
@@ -724,6 +761,13 @@ pub const BUILTINS: &[Spec] = &[
         container: false,
         parts: &[],
         schema: || schema_for!(CodeProps),
+    },
+    Spec {
+        name: "Math",
+        description: "块级公式，latex 写 LaTeX 源码，默认居中；number 是右边的编号",
+        container: false,
+        parts: &[],
+        schema: || schema_for!(MathProps),
     },
     Spec {
         name: "List",
@@ -798,7 +842,7 @@ pub const BUILTINS: &[Spec] = &[
 ];
 
 /// 不能当元素、只用来挂样式的组件名。
-pub const STYLE_ONLY: &[&str] = &["InlineCode"];
+pub const STYLE_ONLY: &[&str] = &["InlineCode", "InlineMath"];
 
 pub fn spec(name: &str) -> Option<&'static Spec> {
     BUILTINS.iter().find(|s| s.name == name)
@@ -821,6 +865,7 @@ pub fn parse(kind: &str, props: &serde_json::Value) -> anyhow::Result<Component>
         }
         "Text" => Component::Text(serde_json::from_value(p)?),
         "Code" => Component::Code(serde_json::from_value(p)?),
+        "Math" => Component::Math(serde_json::from_value(p)?),
         "List" => Component::List(serde_json::from_value(p)?),
         "Table" => Component::Table(serde_json::from_value(p)?),
         "Image" => Component::Image(serde_json::from_value(p)?),
@@ -831,7 +876,9 @@ pub fn parse(kind: &str, props: &serde_json::Value) -> anyhow::Result<Component>
         "TableOfContents" => Component::TableOfContents(serde_json::from_value(p)?),
         "Slide" => Component::Slide(serde_json::from_value(p)?),
         "Section" => Component::Section(serde_json::from_value(p)?),
-        "InlineCode" => anyhow::bail!("InlineCode 只能写在文字的 runs 里，不能单独当元素"),
+        "InlineCode" | "InlineMath" => {
+            anyhow::bail!("{kind} 只能写在文字的 runs 里，不能单独当元素")
+        }
         other => anyhow::bail!("组件 `{other}` 没注册"),
     };
     for t in c.inlines_mut() {

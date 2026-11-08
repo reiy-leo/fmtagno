@@ -98,6 +98,10 @@ figure img { max-width: 100%; height: auto; display: block; }
 .fmtagno-inline-img { display: inline-block; vertical-align: baseline; }
 pre { white-space: pre-wrap; }
 code { font: inherit; }
+math { font-family: \"STIX Two Math\", \"Cambria Math\", \"Latin Modern Math\", \"New Computer Modern Math\", math; }
+.fmtagno-math > math { display: inline math; math-style: normal; }
+.fmtagno-math-numbered { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.fmtagno-eqno { justify-self: end; }
 .fmtagno-list { list-style: none; padding: 0; }
 .fmtagno-marker { display: inline-block; white-space: nowrap; }
 .fmtagno-ln { display: inline-block; min-width: 2.5em; color: #999; user-select: none; }
@@ -323,6 +327,30 @@ impl Html<'_> {
             }
             Component::TableOfContents(p) => self.toc(n, p, &st),
             Component::Code(p) => self.code(n, p, &st),
+            Component::Math(p) => {
+                let body = match crate::math::to_mathml(&p.latex, true) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        self.warn.math_failed(FORMAT, &n.id, &p.latex, &e);
+                        format!("<code>{}</code>", esc(&p.latex))
+                    }
+                };
+                match &p.number {
+                    Some(no) => {
+                        let _ = writeln!(
+                            self.out,
+                            "<div class=\"fmtagno-math fmtagno-math-numbered\" id=\"{id}\"{st}><span></span>{body}<span class=\"fmtagno-eqno\">({})</span></div>",
+                            esc(&no.to_string())
+                        );
+                    }
+                    None => {
+                        let _ = writeln!(
+                            self.out,
+                            "<div class=\"fmtagno-math\" id=\"{id}\"{st}>{body}</div>"
+                        );
+                    }
+                }
+            }
             Component::List(p) => self.list(n, p, &st),
             Component::Table(p) => self.table(n, p, parent),
             Component::Image(p) => self.image(n, p, parent),
@@ -877,12 +905,23 @@ impl Html<'_> {
             };
             text = format!("<span class=\"fmtagno-field\" data-field=\"{k}\">{text}</span>");
         }
-        let (open, close) = if r.is_code() {
+        let mut code = r.is_code();
+        if r.is_math() {
+            text = match crate::math::to_mathml(&r.text, false) {
+                Ok(m) => m,
+                Err(e) => {
+                    self.warn.math_failed(FORMAT, id, &r.text, &e);
+                    code = true;
+                    text
+                }
+            };
+        }
+        let (open, close) = if code {
             ("<code", "</code>")
         } else {
             ("<span", "</span>")
         };
-        let body = if css.is_empty() && !r.is_code() {
+        let body = if css.is_empty() && !code {
             text
         } else if css.is_empty() {
             format!("{open}>{text}{close}")
