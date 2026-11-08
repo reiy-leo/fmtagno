@@ -650,14 +650,14 @@ docx 里各部位的样式现在逐格写成直接格式。docx-rs 还不支持 
 | | Word | HTML | PDF | Markdown |
 |---|---|---|---|---|
 | InlineMath | 段落里的 `<m:oMath>`，夹在普通 run 中间 | `<math>`（MathML） | `$…$` | `$…$` |
-| Math | 一段里放 `<m:oMathPara>`，对齐写在 `m:jc` 上 | `<math display="block">` | `$display(…)$` | `$$` 单独成块，编号写成 `\tag{1}` |
+| Math | 一段里放 `<m:oMathPara>`，对齐写在 `m:jc` 上 | `<math displaystyle="true">`，外层 div 管对齐 | `$display(…)$` | `$$` 单独成块，编号写成 `\tag{1}` |
 
 几个格式各自的情况：
 
 - **docx**：转成 Word 的公式（OMML），在 Word 里双击就能改。求和、积分是 `m:nary`，分数 `m:f`，根号 `m:rad`，矩阵 `m:m`，能拉伸的括号 `m:d`，重音 `m:acc`，上下划线 `m:bar`，上下大括号 `m:groupChr`，`\lim` 这类下面带字的是 `m:limLow`。公式字体用 Cambria Math，字号、颜色、粗体跟着样式。带编号的块级公式是一段里放居中、右对齐两个制表位，公式这时按行内大小排（分数会小一点）。行内公式不能带链接，写了 `href` 也不加。
 - **pdf**：转成 Typst 公式，字体用 Typst 自带的 New Computer Modern Math，`\text{}` 里的中文往后找正文字体。万一转出来的源码 Typst 排不了，整份文档的公式改成显示 LaTeX 原文再排一次，并给警告。
 - **html**：MathML 直接写进页面，不用 MathJax 这类脚本，离线也能看。括号拉伸、大号求和符号要靠系统里的公式字体：macOS 有 STIX Two Math，Windows 有 Cambria Math，Linux 没装公式字体时会显示成普通大小。
-- **Markdown**：GitHub 的写法。表格格子里公式里的 `|` 没有转义，会把格子拆开，写绝对值时用 `\lvert x \rvert`。
+- **Markdown**：GitHub 的写法。Markdown 没有对齐写法，`align` 不管用，块级公式按 GitHub 默认居中显示。表格格子里公式里的 `|` 没有转义，会把格子拆开，写绝对值时用 `\lvert x \rvert`。
 
 docx 和 pdf 认不出的结构（比如左上下标）退成纯文字，并给一次警告。
 
