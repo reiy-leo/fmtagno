@@ -422,6 +422,12 @@ impl Ctx {
         let td = diff(&thoist, &to_map(&exp_t), &inh_keys, &soft);
         tstyle.extend(td);
         let tcomputed = merged(&exp_t, &from_map(&tstyle));
+        // 和内置表格样式一样的字段不用写
+        if let Ok(Value::Object(raw)) = serde_json::to_value(&exp_t) {
+            let mut raw = raw;
+            super::clean_map(&mut raw);
+            tstyle.retain(|k, v| !raw.get(k).is_some_and(|e| same(e, v)));
+        }
         let cell_base = tcomputed.inherited();
 
         // 表头：第一行写了 tblHeader，并且每格都有底纹（内置表头底纹去不掉）

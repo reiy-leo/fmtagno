@@ -623,6 +623,53 @@ struct Ctx {
     in_table: usize,
     /// 当前表格样式的段落、文字属性
     tbl_base: Option<(PPr, Style)>,
+    /// 预扫一遍正文段落的有效样式：(种类, 有效样式)，用来定 Document、Text、Heading.N 的样式
+    stats: Vec<(Kind, Map<String, Value>)>,
+}
+
+/// 预扫时段落的种类。
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Kind {
+    Text,
+    Heading(u8),
+    List,
+}
+
+/// 一组样式里某个字段最常见的值；没写的也算一种。
+fn majority(list: &[&Map<String, Value>], key: &str) -> Option<Value> {
+    let mut best: Option<(Option<&Value>, usize)> = None;
+    for m in list {
+        let v = m.get(key);
+        let n = list
+            .iter()
+            .filter(|x| match (x.get(key), v) {
+                (Some(a), Some(b)) => same(a, b),
+                (None, None) => true,
+                _ => false,
+            })
+            .count();
+        if best.is_none_or(|(_, b)| n > b) {
+            best = Some((v, n));
+        }
+    }
+    best.and_then(|(v, _)| v.cloned())
+}
+
+/// 用多数段落的值改 `m` 里的这些字段；多数段落没写的字段从 `m` 里去掉。
+fn apply_majority(m: &mut Map<String, Value>, list: &[&Map<String, Value>], keys: &[&str]) {
+    if list.is_empty() {
+        return;
+    }
+    for k in keys {
+        match majority(list, k) {
+            Some(v) => {
+                m.insert(k.to_string(), v);
+            }
+            None => {
+                m.remove(*k);
+            }
+        }
+    }
 }
 
 impl Ctx {
@@ -690,6 +737,7 @@ impl Ctx {
             even_odd,
             in_table: 0,
             tbl_base: None,
+            stats: Vec::new(),
         })
     }
 
@@ -707,6 +755,7 @@ impl Ctx {
         let text = String::from_utf8_lossy(&self.files[main]).into_owned();
         let doc = Document::parse(&text).with_context(|| format!("{main} 不是合法的 XML"))?;
         let body = child(doc.root_element(), "body").context("document.xml 里没有 w:body")?;
+        self.prepass(body);
         self.base_styles();
         // 先把所有节的设置读出来，处理内容时要知道版心宽度
         let sect_nodes: Vec<Node> = body
@@ -1004,7 +1053,15 @@ impl Ctx {
                     .entry("style")
                     .or_insert_with(|| Value::Object(Map::new()));
                 if let Value::Object(m) = st {
-                    m.insert("spaceAfter".into(), json!(round2(after)));
+                    let builtin_after = builtin("Table")
+                        .and_then(|b| b.space_after)
+                        .map(|l| l.abs_pt())
+                        .unwrap_or(0.0);
+                    if (after - builtin_after).abs() < 0.01 {
+                        m.remove("spaceAfter");
+                    } else {
+                        m.insert("spaceAfter".into(), json!(round2(after)));
+                    }
                 }
             }
             return;
@@ -1150,7 +1207,47 @@ impl Ctx {
         s
     }
 
-    /// Document、Text 的组件样式：取 Word 的 docDefaults 和默认段落样式（Normal）。
+    /// 先把正文段落（不含表格里的）读一遍，记下各类段落的有效样式。
+    fn prepass(&mut self, body: Node) {
+        let warns = std::mem::take(&mut self.warns);
+        let frames = std::mem::take(&mut self.frames);
+        let paras: Vec<Node> = body
+            .descendants()
+            .filter(|n| isw(*n, "p"))
+            .filter(|n| !n.ancestors().skip(1).any(|a| isw(a, "tbl") || isw(a, "txbxContent")))
+            .collect();
+        let mut stats = Vec::new();
+        for p in paras {
+            let para = self.para(p);
+            if para.in_toc || para.toc.is_some() {
+                continue;
+            }
+            let visible = para.segs.iter().any(|s| match s {
+                Seg::Text { text, .. } => !text.trim().is_empty(),
+                Seg::Field { .. } => true,
+                _ => false,
+            });
+            if !visible {
+                continue;
+            }
+            let kind = if para.list.is_some() {
+                Kind::List
+            } else if let Some(l) = para.pstyle.as_deref().and_then(|s| self.styles.heading_level(s)) {
+                Kind::Heading(l)
+            } else {
+                Kind::Text
+            };
+            let (eff, _) = self.para_eff(&para, &para.segs);
+            stats.push((kind, eff));
+        }
+        self.stats = stats;
+        self.warns = warns;
+        self.frames = frames;
+        self.toc_started = None;
+    }
+
+    /// Document、Text 的组件样式：取 Word 的 docDefaults 和默认段落样式（Normal），
+    /// 再按多数正文段落实际用的值改（fmtagno 生成的 docx 每段都写了直接格式）。
     fn base_styles(&mut self) {
         let (np, nr) = self
             .styles
@@ -1165,6 +1262,19 @@ impl Ctx {
         let mut full = ppr.to_style(fs);
         full.merge(&text_of(&rpr));
         let mut eff = to_map(&full.inherited());
+        {
+            let body: Vec<&Map<String, Value>> = self
+                .stats
+                .iter()
+                .filter(|(k, _)| matches!(k, Kind::Text | Kind::List))
+                .map(|(_, m)| m)
+                .collect();
+            for k in ["fontFamily", "fontSize", "color", "lineHeight"] {
+                if let Some(v) = majority(&body, k) {
+                    eff.insert(k.to_string(), v);
+                }
+            }
+        }
         if !eff.contains_key("fontSize") {
             eff.insert("fontSize".into(), json!(10));
         }
@@ -1206,8 +1316,17 @@ impl Ctx {
             self.out_styles.insert("Document".into(), Value::Object(d));
             self.comp.insert("Document".into(), doc_style);
         }
-        // Text：Normal 的段落间距这些
-        let local = to_map(&full);
+        // Text：Normal 的段落间距这些，按多数正文段落改
+        let mut local = to_map(&full);
+        {
+            let texts: Vec<&Map<String, Value>> = self
+                .stats
+                .iter()
+                .filter(|(k, _)| *k == Kind::Text)
+                .map(|(_, m)| m)
+                .collect();
+            apply_majority(&mut local, &texts, &["spaceBefore", "spaceAfter", "textIndent", "keepWithNext"]);
+        }
         let exp = to_map(&self.expected("Text", None, None));
         let tkeys = [
             "spaceBefore",
@@ -1312,7 +1431,17 @@ impl Ctx {
         let fs = rpr.font_size.map(|l| l.abs_pt()).unwrap_or(10.0);
         let mut full = ppr.to_style(fs);
         full.merge(&text_of(&rpr));
-        let eff = to_map(&full);
+        let mut eff = to_map(&full);
+        {
+            let hs: Vec<&Map<String, Value>> = self
+                .stats
+                .iter()
+                .filter(|(k, _)| *k == Kind::Heading(level))
+                .map(|(_, m)| m)
+                .collect();
+            let keys: Vec<&str> = PARA_KEYS.iter().chain(TEXT_KEYS.iter()).copied().collect();
+            apply_majority(&mut eff, &hs, &keys);
+        }
         let exp = to_map(&self.expected("Heading", Some(level), None));
         let keys: Vec<&str> = PARA_KEYS.iter().chain(TEXT_KEYS.iter()).copied().collect();
         let mut d = diff(&eff, &exp, &keys, &[]);
@@ -2453,7 +2582,7 @@ impl Ctx {
                             }
                         }
                         "creator" => {
-                            if let Some(x) = n.text().filter(|s| !s.trim().is_empty()) {
+                            if let Some(x) = n.text().filter(|s| !s.trim().is_empty() && *s != "unknown") {
                                 meta.insert("author".into(), json!(x));
                             }
                         }
