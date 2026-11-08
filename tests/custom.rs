@@ -80,8 +80,8 @@ fn detects_recursion() {
 
 #[test]
 fn definition_file_parses() {
-    let def = fmtagno::custom::parse_def(include_str!("../examples/catalog/callout.json")).unwrap();
-    assert_eq!(def.name, "Callout");
+    let def = fmtagno::custom::parse_def(include_str!("../examples/catalog/notice.json")).unwrap();
+    assert_eq!(def.name, "Notice");
     assert!(def.container);
     def.validate().unwrap();
 }

@@ -1,0 +1,37 @@
+{
+  "version": "0.1",
+  "meta": { "title": "目录、引用、提示框和分割线", "lang": "zh-CN" },
+  "root": "doc",
+  "elements": {
+    "doc": {
+      "type": "Document",
+      "children": ["title", "toc", "line", "h-a", "intro", "quote", "h-a1", "tip", "warn", "h-a2", "p2", "line2", "h-b", "p3", "h-b1", "p4"]
+    },
+    "title": { "type": "Heading", "props": { "level": 1, "text": "季度报告" } },
+    "toc": { "type": "TableOfContents", "props": { "title": "目录", "levels": 2 } },
+    "line": { "type": "Divider" },
+    "h-a": { "type": "Heading", "props": { "level": 2, "text": "一、概况" } },
+    "intro": { "type": "Text", "props": { "text": "本季度收入稳定增长，下面是一句客户的原话。" } },
+    "quote": {
+      "type": "Quote",
+      "props": { "text": [{ "text": "导出 Word 和 PDF 终于一模一样了，" }, { "text": "省了我们整整一天。", "bold": true }] }
+    },
+    "h-a1": { "type": "Heading", "props": { "level": 3, "text": "1.1 收入" } },
+    "tip": {
+      "type": "Callout",
+      "props": { "icon": "💡", "text": "收入按到账日期统计，不含预收款。" }
+    },
+    "warn": {
+      "type": "Callout",
+      "props": { "icon": "⚠️", "text": "第三个月的数据还没审计，可能会调整。" },
+      "style": { "background": "#FFF8E1", "border": "0.5pt solid #F0C36D" }
+    },
+    "h-a2": { "type": "Heading", "props": { "level": 3, "text": "1.2 支出" } },
+    "p2": { "type": "Text", "props": { "text": "支出主要是服务器和人力。" } },
+    "line2": { "type": "Divider", "style": { "borderBottom": "1pt dashed #999999" } },
+    "h-b": { "type": "Heading", "props": { "level": 2, "text": "二、下季度计划" } },
+    "p3": { "type": "Text", "props": { "text": "下季度继续扩大华东区。" } },
+    "h-b1": { "type": "Heading", "props": { "level": 3, "text": "2.1 招聘" } },
+    "p4": { "type": "Text", "props": { "text": "目录只收到 2 级，这个 3 级标题不会出现在目录里。" } }
+  }
+}

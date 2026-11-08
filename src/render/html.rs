@@ -6,7 +6,10 @@ use base64::Engine;
 
 use crate::{
     assets,
-    components::{CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableProps},
+    components::{
+        CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableOfContentsProps,
+        TableProps,
+    },
     doc::{Doc, Node, SectionLayout},
     render::{
         Options, Output,
@@ -28,6 +31,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
         opts,
         sec_css: String::new(),
         content_width: 0.0,
+        root: tree,
     };
     let lang = doc.meta.lang.as_deref().unwrap_or("zh-CN");
     let title = doc.meta.title.as_deref().unwrap_or("fmtagno");
@@ -84,7 +88,10 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> Output {
 
 const BASE_CSS: &str = "\
 * { box-sizing: border-box; }
-h1, h2, h3, h4, h5, h6, p, pre, ul, ol, figure, table { margin: 0; }
+h1, h2, h3, h4, h5, h6, p, pre, ul, ol, figure, table, blockquote { margin: 0; }
+hr { border: none; margin: 0; height: 0; overflow: visible; }
+.fmtagno-toc a { color: inherit; text-decoration: none; }
+.fmtagno-toc-fill { display: none; }
 table { border-collapse: collapse; }
 th, td { text-align: inherit; vertical-align: top; font-weight: inherit; }
 figure img { max-width: 100%; height: auto; display: block; }
@@ -138,6 +145,9 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
 .pagedjs_pagebox { position: relative; isolation: isolate; }
 .pagedjs_area { position: relative; }
 .fmtagno-hf-box { position: absolute; }
+.fmtagno-toc a { display: flex; align-items: baseline; }
+.fmtagno-toc-fill { display: block; flex: 1; border-bottom: 1px dotted currentColor; margin: 0 4px; opacity: .6; }
+.fmtagno-toc a::after { content: target-counter(attr(href), page); }
 /* 排版时先放在原地不占位，免得 Paged.js 以为它溢出了页面；排完再挪回坐标上 */
 .fmtagno-abs:not(.fmtagno-placed) { top: 0 !important; left: 0 !important; visibility: hidden; }
 @media print { body { background: none; } }
@@ -227,6 +237,8 @@ struct Html<'a> {
     sec_css: String,
     /// 版心宽度，pt；auto 列和比例列混写时用来分宽度
     content_width: f32,
+    /// 整棵树，目录要从里面收标题
+    root: &'a Node,
 }
 
 impl Html<'_> {
@@ -293,6 +305,23 @@ impl Html<'_> {
                 }
                 self.out.push_str("</p>\n");
             }
+            Component::Quote(p) => {
+                let _ = write!(self.out, "<blockquote id=\"{id}\"{st}>");
+                self.inline(&p.text, &n.style, &n.id);
+                self.out.push_str("</blockquote>\n");
+            }
+            Component::Callout(p) => {
+                let _ = write!(
+                    self.out,
+                    "<aside class=\"fmtagno-callout\" id=\"{id}\"{st}>"
+                );
+                self.inline(&p.text, &n.style, &n.id);
+                self.out.push_str("</aside>\n");
+            }
+            Component::Divider(_) => {
+                let _ = writeln!(self.out, "<hr id=\"{id}\"{st}>");
+            }
+            Component::TableOfContents(p) => self.toc(n, p, &st),
             Component::Code(p) => self.code(n, p, &st),
             Component::List(p) => self.list(n, p, &st),
             Component::Table(p) => self.table(n, p, parent),
@@ -396,6 +425,31 @@ impl Html<'_> {
         } else {
             format!(" style=\"{}\"", esc(&c))
         }
+    }
+
+    /// 目录：链到各标题；--paged 时由 Paged.js 用 target-counter 填页码。
+    fn toc(&mut self, n: &Node, p: &TableOfContentsProps, st: &str) {
+        let _ = writeln!(
+            self.out,
+            "<nav class=\"fmtagno-toc\" id=\"{}\"{st}>",
+            esc(&n.id)
+        );
+        if let Some(t) = &p.title {
+            let ts = common::toc_title_style(n);
+            let a = self.attr(&ts, Some(&n.style), &n.id, Ctx::Block);
+            let _ = writeln!(self.out, "<p{a}>{}</p>", esc(t));
+        }
+        for e in common::toc_entries(self.root, p.depth()) {
+            let es = common::toc_entry_style(n, e.level);
+            let a = self.attr(&es, Some(&n.style), &n.id, Ctx::Block);
+            let _ = writeln!(
+                self.out,
+                "<p{a}><a href=\"#{}\"><span>{}</span><span class=\"fmtagno-toc-fill\"></span></a></p>",
+                esc(&e.id),
+                esc(&e.text)
+            );
+        }
+        self.out.push_str("</nav>\n");
     }
 
     fn code(&mut self, n: &Node, p: &CodeProps, st: &str) {

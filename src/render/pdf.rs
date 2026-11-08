@@ -19,7 +19,10 @@ use typst_layout::PagedDocument;
 
 use crate::{
     assets,
-    components::{CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableProps},
+    components::{
+        CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableOfContentsProps,
+        TableProps,
+    },
     doc::{Doc, HfNodes, Node, SectionLayout},
     render::{
         Options, Output,
@@ -251,6 +254,17 @@ impl Markup<'_> {
                 }
                 self.block(format!("#par[{body}]"), s, parent, &n.id);
             }
+            Component::Quote(p) => {
+                let body = self.inline(&p.text, s);
+                self.block(format!("#par[{body}]"), s, parent, &n.id);
+            }
+            Component::Callout(p) => {
+                let body = self.inline(&p.text, s);
+                self.block(format!("#par[{body}]"), s, parent, &n.id);
+            }
+            // 空盒子，线是它的下边框
+            Component::Divider(_) => self.block(String::new(), s, parent, &n.id),
+            Component::TableOfContents(p) => self.toc(n, p, parent),
             Component::Code(p) => self.code(n, p, parent),
             Component::List(p) => self.list(n, p, parent),
             Component::Table(p) => self.table(n, p, parent),
@@ -720,6 +734,36 @@ impl Markup<'_> {
             piece = format!("#link({})[{piece}]", lit(h));
         }
         piece
+    }
+
+    /// 目录：typst 的 outline，页码由 typst 排完算出。
+    fn toc(&mut self, n: &Node, p: &TableOfContentsProps, parent: &Style) {
+        let s = &n.style;
+        let mut body = String::new();
+        if let Some(t) = &p.title {
+            let ts = common::toc_title_style(n);
+            let src = self.block_src(format!("#par[#{}]", lit(t)), &ts, s, &n.id);
+            body.push_str(&src);
+        }
+        let e1 = common::toc_entry_style(n, 1);
+        let e2 = common::toc_entry_style(n, 2);
+        let fs = e1.size_pt();
+        let ml = |x: &Style| x.margin_left.map_or(0.0, |l| l.pt(fs, 0.0));
+        let base = ml(&e1);
+        let step = ml(&e2) - base;
+        let above = e1.space_before.map_or(0.0, |l| l.pt(fs, 0.0));
+        let below = e1.space_after.map_or(0.0, |l| l.pt(fs, 0.0));
+        let mut es = e1.clone();
+        es.margin_left = None;
+        es.space_before = None;
+        es.space_after = None;
+        let ol = format!(
+            "#show outline.entry: it => block(above: {above}pt, below: {below}pt, inset: (left: {base}pt + (it.level - 1) * {step}pt), link(it.element.location(), [#it.body()#box(width: 1fr, repeat(gap: 0.15em)[.])#it.page()]))\n#outline(title: none, depth: {}, indent: 0pt)",
+            p.depth()
+        );
+        let src = self.block_src(ol, &es, s, &n.id);
+        body.push_str(&src);
+        self.block(body, s, parent, &n.id);
     }
 
     fn code(&mut self, n: &Node, p: &CodeProps, parent: &Style) {

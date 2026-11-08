@@ -547,3 +547,50 @@ pub fn rebase_runs(t: &Inline, old: &Style, new: &Style) -> Vec<Run> {
         })
         .collect()
 }
+
+/// 目录里的一项。
+pub struct TocEntry {
+    pub level: u8,
+    pub text: String,
+    pub id: String,
+}
+
+/// 按文档顺序收 1 到 depth 级标题，给 docx、html 的目录用（PDF 交给 typst 的 outline）。
+pub fn toc_entries(root: &Node, depth: u8) -> Vec<TocEntry> {
+    fn walk(n: &Node, depth: u8, out: &mut Vec<TocEntry>) {
+        if let crate::components::Component::Heading(h) = &n.component
+            && h.level <= depth
+        {
+            out.push(TocEntry {
+                level: h.level,
+                text: h.text.plain_text(),
+                id: n.id.clone(),
+            });
+        }
+        for c in &n.children {
+            walk(c, depth, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, depth, &mut out);
+    out
+}
+
+/// 目录标题的样式：目录的可继承字段加 title 部位。
+pub fn toc_title_style(n: &Node) -> Style {
+    let mut s = n.style.inherited();
+    s.merge(&n.part("title"));
+    s
+}
+
+/// 目录项的样式：目录的可继承字段加 entry 部位，再按级缩进 listIndent × (级数 - 1)。
+pub fn toc_entry_style(n: &Node, level: u8) -> Style {
+    let mut s = n.style.inherited();
+    s.merge(&n.part("entry"));
+    let fs = s.size_pt();
+    let step = s.list_indent.map(|x| x.pt(fs, 0.0)).unwrap_or(fs * 1.5);
+    let base = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
+    s.margin_left = Some(crate::style::Len::Pt(base + step * (level as f32 - 1.0)));
+    s.list_indent = None;
+    s
+}

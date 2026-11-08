@@ -489,6 +489,46 @@ pub struct ImageProps {
 #[serde(deny_unknown_fields)]
 pub struct PageBreakProps {}
 
+/// 分割线：一条横线，外观由样式的 borderBottom 决定。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DividerProps {}
+
+/// 引用：一段带左竖线的文字。
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuoteProps {
+    pub text: Inline,
+}
+
+/// 提示框：带底色的一段文字，前面可以放一个图标（emoji 或任意字符）。
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalloutProps {
+    pub text: Inline,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+/// 目录：列出全文的标题。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TableOfContentsProps {
+    /// 目录上方的标题，不写就不显示
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// 收几级标题，默认 3
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 6))]
+    pub levels: Option<u8>,
+}
+
+impl TableOfContentsProps {
+    pub fn depth(&self) -> u8 {
+        self.levels.unwrap_or(3).clamp(1, 6)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SlideProps {
@@ -563,6 +603,10 @@ pub enum Component {
     Table(TableProps),
     Image(ImageProps),
     PageBreak(PageBreakProps),
+    Divider(DividerProps),
+    Quote(QuoteProps),
+    Callout(CalloutProps),
+    TableOfContents(TableOfContentsProps),
     Slide(SlideProps),
     Section(SectionProps),
 }
@@ -578,6 +622,10 @@ impl Component {
             Component::Table(_) => "Table",
             Component::Image(_) => "Image",
             Component::PageBreak(_) => "PageBreak",
+            Component::Divider(_) => "Divider",
+            Component::Quote(_) => "Quote",
+            Component::Callout(_) => "Callout",
+            Component::TableOfContents(_) => "TableOfContents",
             Component::Slide(_) => "Slide",
             Component::Section(_) => "Section",
         }
@@ -600,6 +648,8 @@ impl Component {
         match self {
             Component::Heading(p) => out.push(&mut p.text),
             Component::Text(p) => out.push(&mut p.text),
+            Component::Quote(p) => out.push(&mut p.text),
+            Component::Callout(p) => out.push(&mut p.text),
             Component::List(p) => list(&mut p.items, &mut out),
             Component::Table(p) => {
                 out.extend(p.columns.iter_mut().map(Cell::text_mut));
@@ -704,6 +754,34 @@ pub const BUILTINS: &[Spec] = &[
         schema: || schema_for!(PageBreakProps),
     },
     Spec {
+        name: "Divider",
+        description: "分割线，外观由 borderBottom 决定",
+        container: false,
+        parts: &[],
+        schema: || schema_for!(DividerProps),
+    },
+    Spec {
+        name: "Quote",
+        description: "引用，一段带左竖线的文字",
+        container: false,
+        parts: &[],
+        schema: || schema_for!(QuoteProps),
+    },
+    Spec {
+        name: "Callout",
+        description: "提示框，带底色的一段文字，icon 放在最前面",
+        container: false,
+        parts: &[],
+        schema: || schema_for!(CalloutProps),
+    },
+    Spec {
+        name: "TableOfContents",
+        description: "目录，列出全文 1 到 levels 级标题；docx 打开后更新域才有页码",
+        container: false,
+        parts: &["title", "entry"],
+        schema: || schema_for!(TableOfContentsProps),
+    },
+    Spec {
         name: "Section",
         description: "一节，只能直接放在 root 下面：可以换纸张、方向、页边距、分栏、页眉页脚，页码可以重新开始；没写的沿用上一节",
         container: true,
@@ -747,6 +825,10 @@ pub fn parse(kind: &str, props: &serde_json::Value) -> anyhow::Result<Component>
         "Table" => Component::Table(serde_json::from_value(p)?),
         "Image" => Component::Image(serde_json::from_value(p)?),
         "PageBreak" => Component::PageBreak(serde_json::from_value(p)?),
+        "Divider" => Component::Divider(serde_json::from_value(p)?),
+        "Quote" => Component::Quote(serde_json::from_value(p)?),
+        "Callout" => Component::Callout(serde_json::from_value(p)?),
+        "TableOfContents" => Component::TableOfContents(serde_json::from_value(p)?),
         "Slide" => Component::Slide(serde_json::from_value(p)?),
         "Section" => Component::Section(serde_json::from_value(p)?),
         "InlineCode" => anyhow::bail!("InlineCode 只能写在文字的 runs 里，不能单独当元素"),
@@ -754,6 +836,13 @@ pub fn parse(kind: &str, props: &serde_json::Value) -> anyhow::Result<Component>
     };
     for t in c.inlines_mut() {
         t.normalize();
+    }
+    // 图标当成文字的第一段，后面跟一个 en 空格
+    if let Component::Callout(p) = &mut c
+        && let Some(icon) = p.icon.as_ref().filter(|i| !i.is_empty())
+        && let Inline::Runs(rs) = &mut p.text
+    {
+        rs.insert(0, RunOrText::Run(Run::plain(&format!("{icon}\u{2002}"))));
     }
     Ok(c)
 }

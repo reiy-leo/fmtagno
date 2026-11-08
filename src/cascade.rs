@@ -523,7 +523,13 @@ fn builtin(key: &str) -> Option<&'static Style> {
             "Table.header": { "bold": true, "background": "#F3F3F3" },
             "Image": { "spaceAfter": 6 },
             "Image.caption": { "fontSize": 9, "color": "#666666" },
-            "Slide.title": { "fontSize": 20, "bold": true }
+            "Slide.title": { "fontSize": 20, "bold": true },
+            "Divider": { "borderBottom": "0.5pt solid #D0D7DE", "lineHeight": "1pt", "spaceBefore": 6, "spaceAfter": 12 },
+            "Quote": { "borderLeft": "3pt solid #D0D7DE", "paddingLeft": 10, "color": "#57606A", "spaceAfter": 8 },
+            "Callout": { "background": "#F6F8FA", "border": "0.5pt solid #E1E4E8", "padding": 8, "spaceAfter": 8 },
+            "TableOfContents": { "spaceAfter": 12 },
+            "TableOfContents.title": { "fontSize": 14, "bold": true, "spaceAfter": 6 },
+            "TableOfContents.entry": { "spaceAfter": 2, "listIndent": "1.5em" }
         });
         raw.as_object()
             .unwrap()
