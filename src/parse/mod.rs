@@ -551,16 +551,30 @@ fn clean_map(m: &mut Map<String, Value>) {
     }
 }
 
-/// 每个字段在所有样式里都一样时取出来。
-fn hoist(list: &[Map<String, Value>], keys: &[&str]) -> Map<String, Value> {
+/// 每个字段取出来放到上一层：所有样式都写了这个字段时，取（按权重）最常见的值，
+/// 不一样的那些留在下一层自己写。有样式没写这个字段时不取（下一层没法写「不要」）。
+fn hoist(list: &[(Map<String, Value>, usize)], keys: &[&str]) -> Map<String, Value> {
     let mut out = Map::new();
-    let Some(first) = list.first() else {
+    if list.is_empty() {
         return out;
-    };
+    }
     for k in keys {
-        if let Some(v) = first.get(*k)
-            && list.iter().all(|m| m.get(*k).is_some_and(|w| same(v, w)))
-        {
+        if !list.iter().all(|(m, _)| m.contains_key(*k)) {
+            continue;
+        }
+        let mut best: Option<(&Value, usize)> = None;
+        for (m, _) in list {
+            let v = &m[*k];
+            let w: usize = list
+                .iter()
+                .filter(|(x, _)| same(&x[*k], v))
+                .map(|(_, w)| *w)
+                .sum();
+            if best.is_none_or(|(_, b)| w > b) {
+                best = Some((v, w));
+            }
+        }
+        if let Some((v, _)) = best {
             out.insert(k.to_string(), v.clone());
         }
     }
@@ -1353,6 +1367,18 @@ impl Ctx {
         if let Some(x) = self.named.get(id) {
             return x.clone();
         }
+        // 样式自己（除了默认段落样式）什么都没写，就不用命名样式
+        let dp = self.styles.default_para.clone();
+        let own_empty = self
+            .styles
+            .chain(id)
+            .iter()
+            .filter(|s| Some(&s.id) != dp.as_ref())
+            .all(|s| s.ppr.to_style(10.0).is_empty() && s.rpr.is_empty());
+        if own_empty {
+            self.named.insert(id.to_string(), None);
+            return None;
+        }
         let (sp, sr) = self.styles.para(id);
         let mut ppr = self.styles.default_ppr.clone();
         ppr.merge(&sp);
@@ -1457,11 +1483,13 @@ impl Ctx {
 
     /// 一个段落的有效样式（段落字段 + 各 run 共同的文字字段），和共同字段的键。
     fn para_eff(&self, para: &Para, segs: &[Seg]) -> (Map<String, Value>, Vec<String>) {
-        let runs: Vec<Map<String, Value>> = segs
+        let runs: Vec<(Map<String, Value>, usize)> = segs
             .iter()
             .filter_map(|s| match s {
-                Seg::Text { text, style, .. } if !text.is_empty() => Some(to_map(&text_of(style))),
-                Seg::Field { style, .. } => Some(to_map(&text_of(style))),
+                Seg::Text { text, style, .. } if !text.is_empty() => {
+                    Some((to_map(&text_of(style)), text.chars().count()))
+                }
+                Seg::Field { style, .. } => Some((to_map(&text_of(style)), 1)),
                 _ => None,
             })
             .collect();
@@ -2292,21 +2320,16 @@ impl Ctx {
         let levels = &lr.levels;
         let min_lvl = items.iter().filter_map(|p| p.list.as_ref().map(|l| l.ilvl)).min().unwrap_or(0);
         // 段落和文字
-        let item_runs: Vec<Vec<Map<String, Value>>> = items
+        let all_runs: Vec<(Map<String, Value>, usize)> = items
             .iter()
-            .map(|p| {
-                p.segs
-                    .iter()
-                    .filter_map(|s| match s {
-                        Seg::Text { text, style, .. } if !text.is_empty() => {
-                            Some(to_map(&text_of(style)))
-                        }
-                        _ => None,
-                    })
-                    .collect()
+            .flat_map(|p| p.segs.iter())
+            .filter_map(|s| match s {
+                Seg::Text { text, style, .. } if !text.is_empty() => {
+                    Some((to_map(&text_of(style)), text.chars().count()))
+                }
+                _ => None,
             })
             .collect();
-        let all_runs: Vec<Map<String, Value>> = item_runs.iter().flatten().cloned().collect();
         let hoisted = if all_runs.is_empty() {
             to_map(&text_of(&items[0].run_base))
         } else {

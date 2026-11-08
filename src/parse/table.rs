@@ -297,15 +297,18 @@ impl Ctx {
             pools[if last_r { 2 } else { 4 }].push(e[2].clone());
             pools[if cl.c == 0 { 3 } else { 5 }].push(e[3].clone());
         }
+        // 同样多时取全表最常见的那种线
+        let everything: Vec<Value> = pools.iter().flatten().cloned().collect();
         let common = |v: &Vec<Value>| -> Option<Value> {
-            let mut best: Option<(&Value, usize)> = None;
+            let mut best: Option<(&Value, usize, usize)> = None;
             for x in v {
                 let n = v.iter().filter(|y| same(x, y)).count();
-                if best.is_none_or(|(_, m)| n > m) {
-                    best = Some((x, n));
+                let g = everything.iter().filter(|y| same(x, y)).count();
+                if best.is_none_or(|(_, m, h)| n > m || (n == m && g > h)) {
+                    best = Some((x, n, g));
                 }
             }
-            best.map(|(x, _)| x.clone())
+            best.map(|(x, _, _)| x.clone())
         };
         let base: Vec<Value> = pools
             .iter()
@@ -401,7 +404,7 @@ impl Ctx {
             .copied()
             .chain(["align", "lineHeight", "textIndent", "hangingIndent"])
             .collect();
-        let pool: Vec<Map<String, Value>> = block_info
+        let pool: Vec<(Map<String, Value>, usize)> = block_info
             .iter()
             .filter(|(_, h, s)| !h.is_empty() && !s.is_empty())
             .map(|(e, h, _)| {
@@ -409,7 +412,7 @@ impl Ctx {
                 m.retain(|k, _| {
                     h.iter().any(|x| x == k) || !TEXT_KEYS.contains(&k.as_str())
                 });
-                m
+                (m, 1)
             })
             .collect();
         let thoist = hoist(&pool, &inh_keys);
