@@ -1406,9 +1406,7 @@ fn line_edges(s: &Style, l: LineHeight, fs: f32) -> String {
         }
         LineHeight::AtLeast(x) => {
             let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
-            format!(
-                "top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt"
-            )
+            format!("top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt")
         }
     }
 }
