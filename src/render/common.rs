@@ -594,3 +594,225 @@ pub fn toc_entry_style(n: &Node, level: u8) -> Style {
     s.list_indent = None;
     s
 }
+
+// ---------- 图案边框 ----------
+
+/// CSS 和 Typst 画不出来的线型，用一小块 SVG 图案沿边铺开。HTML 当背景贴，PDF 当 tiling 填充，
+/// 两边用的是同一份 SVG，长得一样。
+///
+/// 图案按「横边」画：x 沿着边，y 是线宽方向（0 到 `width`）。竖边把 x、y 对调。
+/// y = 0 一律在上边或左边，不随边翻转，这样相邻两格共用的线叠在一起也是同一个图案。
+pub struct Tile {
+    /// 图案沿边方向的长度，pt
+    pub period: f32,
+    /// 线宽，pt
+    pub width: f32,
+    body: String,
+    /// 沿边不断的线（双线、三线、粗细线、立体线）：每条是 (离上边或左边的距离, 粗细, 颜色)。
+    /// PDF 按这个拆成几条实线画（块套几层 stroke，表格格子用硬边渐变），免得 tiling 拼缝；虚线、波浪线这里是空的。
+    pub stripes: Vec<(f32, f32, String)>,
+}
+
+impl Tile {
+    /// 铺这条边用的 SVG。`vertical` 为真时是左右两条竖边。
+    pub fn svg(&self, vertical: bool) -> String {
+        let (p, w) = (self.period, self.width);
+        let (sw, sh, g) = if vertical {
+            (w, p, "<g transform='matrix(0 1 1 0 0 0)'>")
+        } else {
+            (p, w, "<g>")
+        };
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='{sw:.3}' height='{sh:.3}' viewBox='0 0 {sw:.3} {sh:.3}' preserveAspectRatio='none'>{g}{}</g></svg>",
+            self.body
+        )
+    }
+
+    /// 和 `svg` 一样，只是图案在线宽方向上挪半个线宽、首尾接上：给 Typst 的 stroke 当 paint 用，
+    /// stroke 的图案以线的中线为原点。
+    pub fn svg_centered(&self, vertical: bool) -> String {
+        let (p, w) = (self.period, self.width);
+        let h = w / 2.0;
+        let (sw, sh) = if vertical { (w, p) } else { (p, w) };
+        let g = |dy: f32| {
+            if vertical {
+                format!("<g transform='matrix(0 1 1 0 {dy:.3} 0)'>{}</g>", self.body)
+            } else {
+                format!("<g transform='translate(0 {dy:.3})'>{}</g>", self.body)
+            }
+        };
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='{sw:.3}' height='{sh:.3}' viewBox='0 0 {sw:.3} {sh:.3}' preserveAspectRatio='none'>{}{}</svg>",
+            g(h),
+            g(-h)
+        )
+    }
+
+    /// 当 CSS url() 用的 data URI。
+    pub fn data_uri(&self, vertical: bool) -> String {
+        let mut o = String::from("data:image/svg+xml,");
+        for ch in self.svg(vertical).chars() {
+            match ch {
+                '%' => o.push_str("%25"),
+                '#' => o.push_str("%23"),
+                '<' => o.push_str("%3C"),
+                '>' => o.push_str("%3E"),
+                '"' => o.push_str("%22"),
+                c => o.push(c),
+            }
+        }
+        o
+    }
+}
+
+/// 这条边要不要用图案画；实线、虚线、点线不用（两边都能原生画）。
+/// HTML 另外还能原生画 double 和四种立体线，调用前自己挑掉。
+pub fn border_tile(b: &Border, side: Edge) -> Option<Tile> {
+    use crate::style::BorderStyle as S;
+    if b.is_none() {
+        return None;
+    }
+    let w = b.width;
+    let c = b.color.css();
+    let rect = |x: f32, y: f32, rw: f32, rh: f32, fill: &str| {
+        format!("<rect x='{x:.3}' y='{y:.3}' width='{rw:.3}' height='{rh:.3}' fill='{fill}'/>")
+    };
+    // 横条纹：单位长度依次是 线、空、线……
+    let stripes = |units: &[f32]| {
+        let k = w / units.iter().sum::<f32>();
+        let (mut y, mut o, mut st) = (0.0, String::new(), Vec::new());
+        for (i, u) in units.iter().enumerate() {
+            if i % 2 == 0 {
+                o.push_str(&rect(0.0, y, 4.0, u * k, &c));
+                st.push((y, u * k, c.clone()));
+            }
+            y += u * k;
+        }
+        Tile {
+            period: 4.0,
+            width: w,
+            body: o,
+            stripes: st,
+        }
+    };
+    // 沿边的虚线段：长度依次是 画、空、画……
+    let u = w.max(0.75);
+    let dashes = |segs: &[f32]| {
+        let (mut x, mut o) = (0.0, String::new());
+        for (i, s) in segs.iter().enumerate() {
+            if i % 2 == 0 {
+                o.push_str(&rect(x, 0.0, s * u, w, &c));
+            }
+            x += s * u;
+        }
+        Tile {
+            period: x,
+            width: w,
+            body: o,
+            stripes: Vec::new(),
+        }
+    };
+    let wave = |y0: f32, h: f32, p: f32| {
+        let sw = h / 3.0;
+        let mid = y0 + h / 2.0;
+        format!(
+            "<path d='M0 {mid:.3} Q{:.3} {:.3} {:.3} {mid:.3} T{p:.3} {mid:.3}' fill='none' stroke='{c}' stroke-width='{sw:.3}'/>",
+            p / 4.0,
+            // 二次曲线最高点只走到控制点的一半，控制点要放到两倍振幅处
+            mid - (h - sw),
+            p / 2.0
+        )
+    };
+    let light = mix_white(&b.color, 0.6);
+    let halves = |a: &str, z: &str| Tile {
+        period: 4.0,
+        width: w,
+        body: format!(
+            "{}{}",
+            rect(0.0, 0.0, 4.0, w / 2.0, a),
+            rect(0.0, w / 2.0, 4.0, w / 2.0, z)
+        ),
+        stripes: vec![
+            (0.0, w / 2.0, a.to_string()),
+            (w / 2.0, w / 2.0, z.to_string()),
+        ],
+    };
+    let top_left = matches!(side, Edge::Top | Edge::Left);
+    Some(match b.style {
+        S::None | S::Solid | S::Thick | S::Dashed | S::Dotted => return None,
+        S::Double => stripes(&[1.0, 1.0, 1.0]),
+        S::Triple => stripes(&[1.0, 1.0, 1.0, 1.0, 1.0]),
+        S::ThinThickSmallGap => stripes(&[1.0, 1.0, 3.0]),
+        S::ThickThinSmallGap => stripes(&[3.0, 1.0, 1.0]),
+        S::ThinThickThinSmallGap => stripes(&[1.0, 1.0, 3.0, 1.0, 1.0]),
+        S::ThinThickMediumGap => stripes(&[1.0, 2.0, 3.0]),
+        S::ThickThinMediumGap => stripes(&[3.0, 2.0, 1.0]),
+        S::ThinThickThinMediumGap => stripes(&[1.0, 2.0, 3.0, 2.0, 1.0]),
+        S::ThinThickLargeGap => stripes(&[1.0, 4.0, 3.0]),
+        S::ThickThinLargeGap => stripes(&[3.0, 4.0, 1.0]),
+        S::ThinThickThinLargeGap => stripes(&[1.0, 4.0, 3.0, 4.0, 1.0]),
+        S::DashDot => dashes(&[3.0, 1.0, 1.0, 1.0]),
+        S::DashDotDot => dashes(&[3.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        S::DashSmallGap => dashes(&[3.0, 0.6]),
+        S::DashDotStroked => {
+            // 斜着的划和点：/// 样子
+            let s = w / 2.0;
+            let poly = |x: f32, len: f32| {
+                format!(
+                    "<polygon points='{:.3},{w:.3} {:.3},{w:.3} {:.3},0 {:.3},0' fill='{c}'/>",
+                    x,
+                    x + len,
+                    x + len + s,
+                    x + s
+                )
+            };
+            Tile {
+                period: 6.0 * u,
+                width: w,
+                body: format!("{}{}", poly(0.0, 3.0 * u), poly(4.0 * u, u)),
+                stripes: Vec::new(),
+            }
+        }
+        S::Wave => {
+            let p = (w * 4.0).max(4.0);
+            Tile {
+                period: p,
+                width: w,
+                body: wave(0.0, w, p),
+                stripes: Vec::new(),
+            }
+        }
+        S::DoubleWave => {
+            let p = (w * 3.0).max(4.0);
+            Tile {
+                period: p,
+                width: w,
+                body: format!("{}{}", wave(0.0, w / 2.0, p), wave(w / 2.0, w / 2.0, p)),
+                stripes: Vec::new(),
+            }
+        }
+        // 立体线：凸起是外亮内暗，凹陷反过来；y = 0 不随边翻转，所以四边都是同一个上下顺序
+        S::ThreeDEmboss => halves(&light, &c),
+        S::ThreeDEngrave => halves(&c, &light),
+        S::Inset | S::Outset => {
+            let dark = (b.style == S::Inset) == top_left;
+            let fill = if dark { c.clone() } else { light.clone() };
+            Tile {
+                period: 4.0,
+                width: w,
+                body: rect(0.0, 0.0, 4.0, w, &fill),
+                stripes: vec![(0.0, w, fill)],
+            }
+        }
+    })
+}
+
+/// 颜色往白色里混 `t`（0–1）。
+fn mix_white(c: &crate::style::Color, t: f32) -> String {
+    let h = c.rgb();
+    let ch = |i: usize| {
+        let v = u8::from_str_radix(&h[i..i + 2], 16).unwrap_or(0) as f32;
+        (v + (255.0 - v) * t).round() as u8
+    };
+    format!("#{:02x}{:02x}{:02x}", ch(0), ch(2), ch(4))
+}

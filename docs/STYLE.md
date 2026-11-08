@@ -108,7 +108,9 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `borderInsideH` / `borderInsideV` | 表格内部横线、竖线 | w:tblBorders insideH / insideV | a:tcPr 的 lnB 等逐格写 | 逐格写 | 逐格写 | table stroke |
 | `borderDiagonal` | 单元格斜线 | w:tl2br / w:tr2bl | a:lnTlToBr | diagonal | — | — |
 
-线型 `style` 只收各格式都有的几种，再按格式换：
+线型 `style` 收 Word 的全部 25 种，艺术边框不算。名字照抄 Word 的 `w:val`，只有三个不一样：`solid` 就是 Word 的 single，`dashDot` 是 dotDash，`dashDotDot` 是 dotDotDash。
+
+常用的几种，各格式这样换：
 
 | fmtagno | Word val | PPT prstDash / cmpd | Excel style | CSS |
 |---|---|---|---|---|
@@ -116,9 +118,32 @@ fmtagno 的样式以 OOXML 为准：先把 Word、PowerPoint、Excel 能配的�
 | `solid` | single | solid | 按粗细：hair（≤0.25pt）、thin（≤1）、medium（≤2）、thick | solid |
 | `dashed` | dashed | dash | dashed / mediumDashed | dashed |
 | `dotted` | dotted | sysDot | dotted | dotted |
-| `dashDot` | dotDash | dashDot | dashDot / mediumDashDot | dashed（近似） |
+| `dashDot` | dotDash | dashDot | dashDot / mediumDashDot | SVG 图案 |
 | `double` | double | cmpd="dbl" | double | double |
-| `wave` | wave | — | — | wavy 只有下划线有，边框退成 solid |
+| `wave` | wave | — | — | SVG 图案 |
+
+剩下的线型，PPT、Excel 先不管，Word 原样写：
+
+| fmtagno | 长什么样 | HTML | PDF |
+|---|---|---|---|
+| `thick` | 粗实线 | solid | 实线 |
+| `dashDotDot` | 一划两点 | SVG 图案 | SVG 图案 |
+| `dashSmallGap` | 空隙很小的虚线 | SVG 图案 | SVG 图案 |
+| `dashDotStroked` | 斜着的一划一点 | SVG 图案 | SVG 图案 |
+| `triple` | 三条细线 | SVG 图案 | 几条实线 |
+| `thinThickSmallGap` 等九种 | 细粗、粗细、细粗细三组，每组再分小、中、大三种空隙 | SVG 图案 | 几条实线 |
+| `doubleWave` | 两条波浪线 | SVG 图案 | SVG 图案 |
+| `threeDEmboss` / `threeDEngrave` | 凸起、凹下去的立体线 | ridge / groove | 一深一浅两条实线 |
+| `outset` / `inset` | 整个框凸出来、凹进去 | outset / inset | 实线，两边深两边浅 |
+
+几条线的线型，线宽按比例分给每条线和中间的空：`double`、`triple` 是线和空一样宽；`thinThickSmallGap` 是 1:1:3（细线、空、粗线），中空隙的空是 2，大空隙是 4。比如 `3pt thinThickSmallGap`：细线 0.6pt，空 0.6pt，粗线 1.8pt。
+
+各格式怎么画：
+
+- Word：直接写 `w:val`，Word 自己画。
+- HTML：CSS 有的线型（solid、dashed、dotted、double、ridge、groove、inset、outset）直接用。CSS 没有的，先写一条同样宽的透明边占位，再用 `::before` 在上面盖一层 SVG 图案。
+- PDF：实线、虚线、点线用 Typst 自带的 stroke。几条线的线型拆成几条实线来画：段落、文本框一层 block 套一层，每层画一条，拐角自己接得上；表格格子用硬边渐变当线的颜色，一条边画出几条线。这样线都是整条的，不会有图案拼接的缝。点划线、波浪线这些才用 SVG 图案铺，和 HTML 用的是同一份图案。
+- Markdown：没有边框，线型直接忽略。
 
 Word 的线宽只能在 0.25pt 到 12pt 之间（sz 2–96），Excel 只有四档，换算时就近取。
 

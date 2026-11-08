@@ -52,3 +52,38 @@ fn table_column_widths_mix_ratio_fixed_auto() {
     let parts: Vec<_> = cols.split(", ").collect();
     assert!(parts[1].ends_with("pt") && parts[2] == "2fr,", "{cols}");
 }
+
+#[test]
+fn all_border_styles_render() {
+    let json = include_str!("../examples/borders.json");
+    let out = fmtagno::render_str(json, fmtagno::render::Format::Pdf, None).unwrap();
+    assert!(out.bytes.starts_with(b"%PDF"));
+}
+
+/// 双线、粗细线不用图案铺：块套几层 stroke，表格格子用硬边渐变；虚线、波浪线才用 tiling。
+#[test]
+fn multi_line_borders_draw_solid_lines() {
+    let one = |border: &str| {
+        let json = format!(
+            r##"{{"root":"d","elements":{{"d":{{"type":"Document","children":["a"]}},
+              "a":{{"type":"Text","props":{{"text":"x"}},"style":{{"border":"{border}","padding":6}}}}}}}}"##
+        );
+        let d = fmtagno::doc::parse(&json).unwrap();
+        let tree = d.tree().unwrap();
+        fmtagno::render::pdf::markup(&d, &tree, &Default::default()).0
+    };
+    // thinThickSmallGap 是 1:1:3：细线 0.6pt，空 0.6pt，粗线 1.8pt；两层 stroke
+    let src = one("3pt thinThickSmallGap #1A73E8");
+    assert_eq!(src.matches("stroke: (top: (paint").count(), 2, "{src}");
+    assert!(src.contains("thickness: 1.800pt"), "{src}");
+    assert!(!src.contains("tiling("), "{src}");
+    // 波浪线还是图案
+    let src = one("3pt wave #1A73E8");
+    assert!(src.contains("fill: tiling("), "{src}");
+
+    let json = include_str!("../examples/borders.json");
+    let d = fmtagno::doc::parse(json).unwrap();
+    let tree = d.tree().unwrap();
+    let (src, _, _) = fmtagno::render::pdf::markup(&d, &tree, &Default::default());
+    assert!(src.contains("paint: gradient.linear("), "表格双线该用渐变");
+}

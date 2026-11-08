@@ -537,19 +537,14 @@ impl Markup<'_> {
         if s.page_break_before == Some(true) {
             src.push_str("#pagebreak(weak: true)\n");
         }
-        let ins: Vec<f32> = Edge::ALL
-            .iter()
-            .map(|e| s.padding_side(*e).unwrap_or(0.0))
-            .collect();
-        let dbl = double_lines(
-            [
-                s.border_side(Edge::Top),
-                s.border_side(Edge::Right),
-                s.border_side(Edge::Bottom),
-                s.border_side(Edge::Left),
-            ],
-            [ins[0], ins[1], ins[2], ins[3]],
-        );
+        // 有图案边：内边距挪进网格中间那格，block 本身不要 inset
+        let content = match stripe_frame(s, &sets, &body).or_else(|| tile_grid(s, &sets, &body)) {
+            Some(grid) => {
+                args.retain(|a| !a.starts_with("inset:"));
+                grid
+            }
+            None => format!("{sets}{body}"),
+        };
         let ml = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         let mr = s.margin_right.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         if ml != 0.0 || mr != 0.0 {
@@ -557,14 +552,14 @@ impl Markup<'_> {
             let (gap, rest): (Vec<String>, Vec<String>) = args
                 .into_iter()
                 .partition(|a| a.starts_with("above:") || a.starts_with("below:"));
-            let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", rest.join(", "));
+            let inner = format!("#block({})[\n{content}\n]", rest.join(", "));
             let _ = writeln!(
                 src,
                 "#block({})[#pad(left: {ml}pt, right: {mr}pt)[{inner}]]",
                 gap.join(", ")
             );
         } else {
-            let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
+            let inner = format!("#block({})[\n{content}\n]", args.join(", "));
             let _ = writeln!(src, "{inner}");
         }
         src
@@ -929,7 +924,8 @@ impl Markup<'_> {
                 let st: Vec<String> = ["top", "right", "bottom", "left"]
                     .iter()
                     .zip(b.iter())
-                    .map(|(k, b)| format!("{k}: {}", stroke(b.as_ref())))
+                    .zip(Edge::ALL)
+                    .map(|((k, b), e)| format!("{k}: {}", cell_stroke(b.as_ref(), e)))
                     .collect();
                 args.push(format!("stroke: ({})", st.join(", ")));
                 let pads: Vec<String> = Edge::ALL
@@ -952,10 +948,6 @@ impl Markup<'_> {
                     .iter()
                     .map(|e| part.padding_side(*e).unwrap_or(pad))
                     .collect();
-                let dbl = double_lines(
-                    [b[0].as_ref(), b[1].as_ref(), b[2].as_ref(), b[3].as_ref()],
-                    [ins[0], ins[1], ins[2], ins[3]],
-                );
                 // 最小行高：Typst 的行只有固定高度，最小高度靠把内容撑到那么高（只看单行的格子）
                 if let Some(h) = rh.filter(|h| !h.exact && sl.row_span == 1) {
                     let min = (h.height - ins[0] - ins[2]).max(0.0);
@@ -969,7 +961,7 @@ impl Markup<'_> {
                     );
                     sets = String::new();
                 }
-                let cell = format!("table.cell({})[{dbl}{sets}{text}]", args.join(", "));
+                let cell = format!("table.cell({})[{sets}{text}]", args.join(", "));
                 if g.has_header && r == 0 {
                     header.push(cell);
                 } else {
@@ -1138,74 +1130,203 @@ impl Markup<'_> {
     }
 }
 
-/// 某一边的 typst stroke。
-fn stroke(b: Option<&Border>) -> String {
+/// 某一边的 typst stroke。要用图案画的线型（见 `common::border_tile`）这里不画：块交给 stripe_frame、tile_grid，
+/// 表格格子交给 cell_stroke。
+fn stroke(b: Option<&Border>, side: Edge) -> String {
     match b {
         None => "none".into(),
         Some(b) if b.is_none() => "none".into(),
+        Some(b) if common::border_tile(b, side).is_some() => "none".into(),
         Some(b) => {
             let dash = match b.style {
                 BorderStyle::Dashed => ", dash: \"dashed\"",
                 BorderStyle::Dotted => ", dash: \"dotted\"",
-                BorderStyle::DashDot => ", dash: \"dash-dotted\"",
                 _ => "",
             };
-            // 双线：Typst 只有单线，这里画外面那条（线宽 1/3），里面那条由 double_lines 补
-            let w = if b.style == BorderStyle::Double {
-                b.width / 3.0
-            } else {
+            format!(
+                "(paint: {}, thickness: {}pt{dash})",
+                color(&b.color),
                 b.width
-            };
-            format!("(paint: {}, thickness: {w}pt{dash})", color(&b.color))
+            )
         }
     }
 }
 
-/// 双线边框里面那条线：按 CSS 的画法，两条线和中间空隙各占线宽的 1/3。
-/// 外线由 stroke 画在边上，这里在盒子内容里用 place 往里挪 2/3 线宽再画一条。
-/// `sides` 按上右下左，`inset` 是盒子的内边距（place 以内容区为准，要先退回边上）。
-fn double_lines(sides: [Option<&Border>; 4], inset: [f32; 4]) -> String {
-    let [t, r, b, l] = inset;
-    let mut o = String::new();
-    for (i, side) in sides.iter().enumerate() {
-        let Some(bd) = side.filter(|x| x.style == BorderStyle::Double && !x.is_none()) else {
+/// 一条线：(线中心离外沿的距离, 粗细, 颜色)。
+type Line = (f32, f32, String);
+
+/// 块的多线边框（双线、三线、粗细线、立体线）：每条线是一层 block 的 stroke，一层套一层往里画。
+/// 线都是整条的矩形边，没有图案拼缝；拐角由 stroke 自己接上，跨页时每页各画一圈，和普通边框一样。
+/// 线画在盒子里面、内边距外面，和 HTML 一致。有虚线、波浪线这类要铺图案的边时返回 None，交给 tile_grid。
+fn stripe_frame(s: &Style, sets: &str, body: &str) -> Option<String> {
+    // 每条边：(线宽, 各层的线：(线中心离外沿的距离, 粗细, 颜色))
+    let mut sides: Vec<(f32, Vec<Line>)> = Vec::new();
+    let mut any = false;
+    for e in Edge::ALL {
+        let tile = s.border_side(e).and_then(|b| common::border_tile(b, e));
+        match tile {
+            Some(t) if t.stripes.is_empty() => return None,
+            Some(t) => {
+                any = true;
+                let lines = t
+                    .stripes
+                    .iter()
+                    .map(|(off, th, c)| (off + th / 2.0, *th, c.clone()))
+                    .collect();
+                sides.push((t.width, lines));
+            }
+            None => sides.push((0.0, Vec::new())),
+        }
+    }
+    if !any {
+        return None;
+    }
+    let layers = sides.iter().map(|(_, l)| l.len()).max().unwrap_or(0);
+    // 第 k 层 block 的边离外沿多远；这条边没有第 k 条线时就贴着线宽的里沿
+    let pos = |i: usize, k: usize| -> f32 {
+        let (w, l) = &sides[i];
+        l.get(k).map(|x| x.0).unwrap_or(*w)
+    };
+    let fmt4 = |v: [f32; 4]| {
+        format!(
+            "(top: {:.3}pt, right: {:.3}pt, bottom: {:.3}pt, left: {:.3}pt)",
+            v[0], v[1], v[2], v[3]
+        )
+    };
+    let pads: [f32; 4] = std::array::from_fn(|i| s.padding_side(Edge::ALL[i]).unwrap_or(0.0));
+    let mut open = String::new();
+    // 最外一层只负责把第一条线挪到位
+    let _ = write!(
+        open,
+        "#block(width: 100%, spacing: 0pt, inset: {})[",
+        fmt4(std::array::from_fn(|i| pos(i, 0)))
+    );
+    for k in 0..layers {
+        let strokes: Vec<String> = ["top", "right", "bottom", "left"]
+            .iter()
+            .enumerate()
+            .map(|(i, key)| match sides[i].1.get(k) {
+                Some((_, th, c)) => format!("{key}: (paint: rgb(\"{c}\"), thickness: {th:.3}pt)"),
+                None => format!("{key}: none"),
+            })
+            .collect();
+        let inset: [f32; 4] = std::array::from_fn(|i| {
+            if k + 1 < layers {
+                pos(i, k + 1) - pos(i, k)
+            } else {
+                sides[i].0 - pos(i, k) + pads[i]
+            }
+        });
+        let _ = write!(
+            open,
+            "#block(width: 100%, spacing: 0pt, stroke: ({}), inset: {})[",
+            strokes.join(", "),
+            fmt4(inset)
+        );
+    }
+    Some(format!("{open}\n{sets}{body}\n{}", "]".repeat(layers + 1)))
+}
+
+/// 块的图案边框（点划线、波浪线等）：用 3×3 网格把内容围起来，四边那几格用图案当 fill
+/// （fill 跟着格子的大小走，跨页也能接上）。和 HTML 一样，线画在盒子里面、内边距外面；
+/// 角上用横边的图案。没有图案边时返回 None。
+fn tile_grid(s: &Style, sets: &str, body: &str) -> Option<String> {
+    let mut fills: [Option<String>; 4] = Default::default();
+    let mut w = [0.0f32; 4];
+    for (i, e) in Edge::ALL.iter().enumerate() {
+        let Some(b) = s.border_side(*e) else { continue };
+        let Some(t) = common::border_tile(b, *e) else {
             continue;
         };
-        let w = bd.width / 3.0;
-        let off = bd.width * 2.0 / 3.0;
-        let st = format!("(paint: {}, thickness: {w}pt)", color(&bd.color));
-        let _ = match i {
-            0 => write!(
-                o,
-                "#place(top + left, dx: {}pt, dy: {}pt, line(length: 100% + {}pt, stroke: {st}))",
-                -l,
-                off - t,
-                l + r
-            ),
-            2 => write!(
-                o,
-                "#place(bottom + left, dx: {}pt, dy: {}pt, line(length: 100% + {}pt, stroke: {st}))",
-                -l,
-                b - off,
-                l + r
-            ),
-            1 => write!(
-                o,
-                "#place(top + right, dx: {}pt, dy: {}pt, line(angle: 90deg, length: 100% + {}pt, stroke: {st}))",
-                r - off,
-                -t,
-                t + b
-            ),
-            _ => write!(
-                o,
-                "#place(top + left, dx: {}pt, dy: {}pt, line(angle: 90deg, length: 100% + {}pt, stroke: {st}))",
-                off - l,
-                -t,
-                t + b
-            ),
-        };
+        w[i] = t.width;
+        fills[i] = Some(tiling(&t, matches!(e, Edge::Left | Edge::Right)));
     }
-    o
+    if fills.iter().all(Option::is_none) {
+        return None;
+    }
+    let pads: Vec<String> = Edge::ALL
+        .iter()
+        .zip(["top", "right", "bottom", "left"])
+        .map(|(e, k)| format!("{k}: {}pt", s.padding_side(*e).unwrap_or(0.0)))
+        .collect();
+    let cell = |f: &Option<String>, span: usize| match f {
+        Some(f) => format!("grid.cell(colspan: {span}, fill: {f})[]"),
+        None => format!("grid.cell(colspan: {span})[]"),
+    };
+    Some(format!(
+        "{sets}#grid(columns: ({}pt, 1fr, {}pt), rows: ({}pt, auto, {}pt), {}, {}, block(width: 100%, inset: ({}))[{body}], {}, {})",
+        w[3],
+        w[1],
+        w[0],
+        w[2],
+        cell(&fills[0], 3),
+        cell(&fills[3], 1),
+        pads.join(", "),
+        cell(&fills[1], 1),
+        cell(&fills[2], 3),
+    ))
+}
+
+/// 一条边的 SVG 图案，当 fill 用。
+fn tiling(t: &common::Tile, vertical: bool) -> String {
+    let (tw, th) = if vertical {
+        (t.width, t.period)
+    } else {
+        (t.period, t.width)
+    };
+    format!(
+        "tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt))",
+        lit(&t.svg(vertical))
+    )
+}
+
+/// 表格格子某一边的 stroke。格子边线的长短跟着行高走，所以图案线也写成 stroke 的 paint：
+/// 不断的线（双线、粗细线、立体线）用硬边渐变画成几条，没有拼缝；虚线、波浪线用以线为中心的 SVG 图案铺。
+/// 和 Typst 的 stroke 一样，线的中线压在格子边上。
+fn cell_stroke(b: Option<&Border>, side: Edge) -> String {
+    let Some(t) = b.and_then(|x| common::border_tile(x, side)) else {
+        return stroke(b, side);
+    };
+    let vertical = matches!(side, Edge::Left | Edge::Right);
+    let paint = if t.stripes.is_empty() {
+        let (tw, th) = if vertical {
+            (t.width, t.period)
+        } else {
+            (t.period, t.width)
+        };
+        format!(
+            "tiling(size: ({tw}pt, {th}pt), relative: \"self\", image(bytes({}), format: \"svg\", width: {tw}pt, height: {th}pt))",
+            lit(&t.svg_centered(vertical))
+        )
+    } else {
+        stripe_gradient(&t, vertical)
+    };
+    format!("(paint: {paint}, thickness: {}pt)", t.width)
+}
+
+/// 几条平行线写成一个硬边渐变：从上（或左）往下（或右），线的地方是线的颜色，空隙透明。
+fn stripe_gradient(t: &common::Tile, vertical: bool) -> String {
+    let pct = |x: f32| format!("{:.3}%", (x / t.width * 100.0).clamp(0.0, 100.0));
+    let mut stops = Vec::new();
+    let mut y = 0.0;
+    let clear = |c: &str| format!("rgb(\"{c}\").transparentize(100%)");
+    for (off, th, c) in &t.stripes {
+        if *off > y {
+            stops.push(format!("({}, {})", clear(c), pct(y)));
+            stops.push(format!("({}, {})", clear(c), pct(*off)));
+        }
+        stops.push(format!("(rgb(\"{c}\"), {})", pct(*off)));
+        stops.push(format!("(rgb(\"{c}\"), {})", pct(off + th)));
+        y = off + th;
+    }
+    if y < t.width
+        && let Some((_, _, c)) = t.stripes.last()
+    {
+        stops.push(format!("({}, {})", clear(c), pct(y)));
+        stops.push(format!("({}, 100%)", clear(c)));
+    }
+    let angle = if vertical { "0deg" } else { "90deg" };
+    format!("gradient.linear({}, angle: {angle})", stops.join(", "))
 }
 
 fn strokes(s: &Style) -> Vec<String> {
@@ -1214,7 +1335,7 @@ fn strokes(s: &Style) -> Vec<String> {
         .zip(["top", "right", "bottom", "left"])
         .filter_map(|(e, k)| {
             s.border_side(*e)
-                .map(|b| format!("{k}: {}", stroke(Some(b))))
+                .map(|b| format!("{k}: {}", stroke(Some(b), *e)))
         })
         .collect()
 }

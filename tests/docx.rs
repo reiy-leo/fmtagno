@@ -151,3 +151,18 @@ fn em_indent_writes_chars() {
     assert!(has(b, r#"<w:ind w:left="400" w:right="200" />"#));
     assert!(!has(b, "w:right=\"100000"));
 }
+
+#[test]
+fn word_border_styles_map_through() {
+    let json = include_str!("../examples/borders.json");
+    let out = fmtagno::render_str(json, fmtagno::render::Format::Docx, None).unwrap();
+    for v in [
+        "thinThickThinLargeGap",
+        "doubleWave",
+        "threeDEngrave",
+        "dashDotStroked",
+        "dotDotDash",
+    ] {
+        assert!(has(&out.bytes, &format!("w:val=\"{v}\"")), "缺 {v}");
+    }
+}

@@ -1,0 +1,378 @@
+{
+  "version": "0.1",
+  "root": "d",
+  "elements": {
+    "d": {
+      "type": "Document",
+      "children": [
+        "h",
+        "t",
+        "b0",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "b8",
+        "b9",
+        "b10",
+        "b11",
+        "b12",
+        "b13",
+        "b14",
+        "b15",
+        "b16",
+        "b17",
+        "b18",
+        "b19",
+        "b20",
+        "b21",
+        "b22",
+        "b23",
+        "b24",
+        "h2",
+        "tbl"
+      ]
+    },
+    "h": {
+      "type": "Heading",
+      "props": {
+        "level": 1,
+        "text": "边框线型"
+      }
+    },
+    "t": {
+      "type": "Text",
+      "props": {
+        "text": "Word 的 25 种线型（不含艺术边框），每个框四边都是 3pt。"
+      }
+    },
+    "b0": {
+      "type": "Text",
+      "props": {
+        "text": "solid"
+      },
+      "style": {
+        "border": "3pt solid #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b1": {
+      "type": "Text",
+      "props": {
+        "text": "thick"
+      },
+      "style": {
+        "border": "3pt thick #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b2": {
+      "type": "Text",
+      "props": {
+        "text": "dashed"
+      },
+      "style": {
+        "border": "3pt dashed #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b3": {
+      "type": "Text",
+      "props": {
+        "text": "dotted"
+      },
+      "style": {
+        "border": "3pt dotted #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b4": {
+      "type": "Text",
+      "props": {
+        "text": "dashDot"
+      },
+      "style": {
+        "border": "3pt dashDot #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b5": {
+      "type": "Text",
+      "props": {
+        "text": "dashDotDot"
+      },
+      "style": {
+        "border": "3pt dashDotDot #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b6": {
+      "type": "Text",
+      "props": {
+        "text": "dashSmallGap"
+      },
+      "style": {
+        "border": "3pt dashSmallGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b7": {
+      "type": "Text",
+      "props": {
+        "text": "dashDotStroked"
+      },
+      "style": {
+        "border": "3pt dashDotStroked #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b8": {
+      "type": "Text",
+      "props": {
+        "text": "double"
+      },
+      "style": {
+        "border": "3pt double #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b9": {
+      "type": "Text",
+      "props": {
+        "text": "triple"
+      },
+      "style": {
+        "border": "3pt triple #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b10": {
+      "type": "Text",
+      "props": {
+        "text": "thinThickSmallGap"
+      },
+      "style": {
+        "border": "3pt thinThickSmallGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b11": {
+      "type": "Text",
+      "props": {
+        "text": "thickThinSmallGap"
+      },
+      "style": {
+        "border": "3pt thickThinSmallGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b12": {
+      "type": "Text",
+      "props": {
+        "text": "thinThickThinSmallGap"
+      },
+      "style": {
+        "border": "3pt thinThickThinSmallGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b13": {
+      "type": "Text",
+      "props": {
+        "text": "thinThickMediumGap"
+      },
+      "style": {
+        "border": "3pt thinThickMediumGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b14": {
+      "type": "Text",
+      "props": {
+        "text": "thickThinMediumGap"
+      },
+      "style": {
+        "border": "3pt thickThinMediumGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b15": {
+      "type": "Text",
+      "props": {
+        "text": "thinThickThinMediumGap"
+      },
+      "style": {
+        "border": "3pt thinThickThinMediumGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b16": {
+      "type": "Text",
+      "props": {
+        "text": "thinThickLargeGap"
+      },
+      "style": {
+        "border": "3pt thinThickLargeGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b17": {
+      "type": "Text",
+      "props": {
+        "text": "thickThinLargeGap"
+      },
+      "style": {
+        "border": "3pt thickThinLargeGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b18": {
+      "type": "Text",
+      "props": {
+        "text": "thinThickThinLargeGap"
+      },
+      "style": {
+        "border": "3pt thinThickThinLargeGap #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b19": {
+      "type": "Text",
+      "props": {
+        "text": "wave"
+      },
+      "style": {
+        "border": "3pt wave #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b20": {
+      "type": "Text",
+      "props": {
+        "text": "doubleWave"
+      },
+      "style": {
+        "border": "3pt doubleWave #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b21": {
+      "type": "Text",
+      "props": {
+        "text": "threeDEmboss"
+      },
+      "style": {
+        "border": "3pt threeDEmboss #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b22": {
+      "type": "Text",
+      "props": {
+        "text": "threeDEngrave"
+      },
+      "style": {
+        "border": "3pt threeDEngrave #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b23": {
+      "type": "Text",
+      "props": {
+        "text": "outset"
+      },
+      "style": {
+        "border": "3pt outset #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "b24": {
+      "type": "Text",
+      "props": {
+        "text": "inset"
+      },
+      "style": {
+        "border": "3pt inset #1a73e8",
+        "padding": 6,
+        "spaceAfter": 10
+      }
+    },
+    "h2": {
+      "type": "Heading",
+      "props": {
+        "level": 2,
+        "text": "表格里的图案线"
+      }
+    },
+    "tbl": {
+      "type": "Table",
+      "props": {
+        "columns": [
+          "品名",
+          "数量",
+          "金额"
+        ],
+        "rows": [
+          [
+            "苹果",
+            "2",
+            "7.00"
+          ],
+          [
+            "梨",
+            "1",
+            "4.00"
+          ],
+          [
+            "合计",
+            "3",
+            "11.00"
+          ]
+        ],
+        "look": {
+          "lastRow": true
+        }
+      },
+      "style": {
+        "border": "0.5pt solid #999999",
+        "borderInsideV": "1.5pt dashDotDot #999999"
+      },
+      "parts": {
+        "lastRow": {
+          "bold": true,
+          "borderTop": "2.5pt thinThickSmallGap #333333"
+        },
+        "header": {
+          "borderBottom": "2pt wave #1a73e8"
+        }
+      }
+    }
+  }
+}
