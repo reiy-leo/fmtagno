@@ -115,6 +115,14 @@ impl Md<'_> {
             Component::Divider(_) => self.blocks.push("---".into()),
             Component::TableOfContents(p) => self.toc(p),
             Component::Code(p) => self.code(p),
+            Component::Math(p) => {
+                let mut b = format!("$$\n{}", p.latex.trim());
+                if let Some(no) = &p.number {
+                    let _ = write!(b, " \\tag{{{no}}}");
+                }
+                b.push_str("\n$$");
+                self.blocks.push(b);
+            }
             Component::List(p) => {
                 let mut s = String::new();
                 self.list(n, &p.items, p.ordered, &mut s);
@@ -321,7 +329,9 @@ impl Md<'_> {
         if r.text.is_empty() {
             return;
         }
-        let mut body = if r.is_code() {
+        let mut body = if r.is_math() {
+            format!("${}$", r.text.trim().replace('\n', " "))
+        } else if r.is_code() {
             let n = longest_run(&r.text, '`') + 1;
             let f = "`".repeat(n);
             let pad = if r.text.starts_with('`') || r.text.ends_with('`') {
@@ -351,7 +361,7 @@ impl Md<'_> {
             Some(VerticalAlign::Sub) => marks.push(("<sub>", "</sub>")),
             _ => {}
         }
-        if !marks.is_empty() && !r.is_code() {
+        if !marks.is_empty() && !r.is_code() && !r.is_math() {
             // 标记不能贴着空白，把首尾空白挪到标记外面
             let lead: String = body.chars().take_while(|c| c.is_whitespace()).collect();
             let trail: String = body
@@ -397,7 +407,9 @@ impl Md<'_> {
                 continue;
             }
             let mut body = html_esc(&r.text).replace('\n', "<br>");
-            if r.is_code() {
+            if r.is_math() {
+                body = format!("${}$", html_esc(r.text.trim()).replace('\n', " "));
+            } else if r.is_code() {
                 body = format!("<code>{body}</code>");
             }
             if on(s.bold) && !on(base.bold) {

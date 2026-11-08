@@ -1,0 +1,63 @@
+{
+  "version": "0.1",
+  "meta": { "title": "公式", "lang": "zh-CN" },
+  "root": "doc",
+  "elements": {
+    "doc": {
+      "type": "Document",
+      "children": ["title", "intro", "pythagoras", "h-block", "quadratic", "sum", "integral", "matrix", "cases", "limit", "colored", "h-table", "table"]
+    },
+    "title": { "type": "Heading", "props": { "level": 1, "text": "公式示例" } },
+    "intro": {
+      "type": "Text",
+      "props": {
+        "text": [
+          "行内公式和文字排在一起：勾股定理 ",
+          { "type": "InlineMath", "text": "a^2+b^2=c^2" },
+          "，圆面积 ",
+          { "type": "InlineMath", "text": "S=\\pi r^2" },
+          "，下标和上标 ",
+          { "type": "InlineMath", "text": "x_i^{2}" },
+          "，希腊字母 ",
+          { "type": "InlineMath", "text": "\\alpha+\\beta=\\gamma" },
+          "，根号 ",
+          { "type": "InlineMath", "text": "\\sqrt{2}\\approx 1.414" },
+          "。"
+        ]
+      }
+    },
+    "pythagoras": {
+      "type": "Text",
+      "props": {
+        "text": [
+          "行内的求和 ",
+          { "type": "InlineMath", "text": "\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}" },
+          " 上下限放在右边，块级公式里放在正上正下。"
+        ]
+      }
+    },
+    "h-block": { "type": "Heading", "props": { "level": 2, "text": "块级公式" } },
+    "quadratic": { "type": "Math", "props": { "latex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}", "number": 1 } },
+    "sum": { "type": "Math", "props": { "latex": "\\sum_{i=1}^{n} i^2 = \\frac{n(n+1)(2n+1)}{6}" } },
+    "integral": { "type": "Math", "props": { "latex": "\\int_0^{\\infty} e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}", "number": "2" } },
+    "matrix": { "type": "Math", "props": { "latex": "A = \\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}, \\quad \\det A = ad - bc" } },
+    "cases": { "type": "Math", "props": { "latex": "|x| = \\begin{cases} x & x \\ge 0 \\\\ -x & x < 0 \\end{cases}" } },
+    "limit": { "type": "Math", "props": { "latex": "\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n = e, \\qquad \\sqrt[3]{27} = 3, \\qquad \\hat{x} + \\vec{v} + \\overline{AB}" } },
+    "colored": {
+      "type": "Math",
+      "props": { "latex": "E = mc^2" },
+      "style": { "fontSize": 16, "color": "#1A73E8", "align": "left", "spaceBefore": 12 }
+    },
+    "h-table": { "type": "Heading", "props": { "level": 2, "text": "表格里的公式" } },
+    "table": {
+      "type": "Table",
+      "props": {
+        "columns": ["名称", "公式"],
+        "rows": [
+          ["二项式系数", [{ "type": "InlineMath", "text": "\\binom{n}{k} = \\frac{n!}{k!(n-k)!}" }]],
+          ["欧拉公式", [{ "type": "InlineMath", "text": "e^{i\\pi} + 1 = 0" }]]
+        ]
+      }
+    }
+  }
+}

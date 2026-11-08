@@ -51,18 +51,37 @@ const FONTS: &[&str] = &[
     "Libertinus Serif",
 ];
 const MONO_FONTS: &[&str] = &["Menlo", "Consolas", "DejaVu Sans Mono"];
+/// 公式字体，typst 自带。
+const MATH_FONT: &str = "New Computer Modern Math";
 /// 找不到字体度量时，行盒基线以上、以下的部分，按常见中文字体估的。
 const ASCENT: f32 = 0.88;
 const DESCENT: f32 = 0.29;
 
 pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> {
-    let (source, files, mut warnings) = markup(doc, tree, opts);
-    let fallbacks = fallback_fonts(&source);
+    let m = markup_with(doc, tree, opts, false);
+    let (mut source, mut warnings) = (m.out, m.warn.list);
     if std::env::var_os("FMTAGNO_DEBUG_TYPST").is_some() {
         eprintln!("{source}");
     }
-    let world = FmtagnoWorld::new(source, files);
-    let warned = typst::compile::<PagedDocument>(&world);
+    let mut world = FmtagnoWorld::new(source.clone(), m.files);
+    let mut warned = typst::compile::<PagedDocument>(&world);
+    // 公式转出来的 Typst 源码万一排不了，整份文档的公式都改成显示 LaTeX 原文再排一次，不让整个 PDF 失败
+    if warned.output.is_err() && m.had_math {
+        let msgs: Vec<String> = match &warned.output {
+            Err(errs) => errs.iter().map(|e| e.message.to_string()).collect(),
+            Ok(_) => Vec::new(),
+        };
+        let again = markup_with(doc, tree, opts, true);
+        source = again.out;
+        warnings = again.warn.list;
+        warnings.push(format!(
+            "pdf：公式排版失败（{}），所有公式改成显示 LaTeX 原文",
+            msgs.join("；")
+        ));
+        world = FmtagnoWorld::new(source.clone(), again.files);
+        warned = typst::compile::<PagedDocument>(&world);
+    }
+    let fallbacks = fallback_fonts(&source);
     for w in warned.warnings.iter() {
         // 默认字体列表本来就是按平台挑着用的，找不到不算问题
         let msg = w.message.to_string();
@@ -141,6 +160,12 @@ const FIELDS_FN: &str = r#"#let fmtagno-info() = {
 "#;
 
 pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<String>) {
+    let m = markup_with(doc, tree, opts, false);
+    (m.out, m.files, m.warn.list)
+}
+
+/// `math_fallback` 为 true 时公式一律显示 LaTeX 原文（等宽字体）。
+fn markup_with<'a>(doc: &Doc, tree: &Node, opts: &'a Options, math_fallback: bool) -> Markup<'a> {
     let mut m = Markup {
         out: String::new(),
         files: Vec::new(),
@@ -148,12 +173,15 @@ pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<Str
         opts,
         margins: [0.0; 4],
         content_width: 0.0,
+        cur_id: String::new(),
+        math_fallback,
+        had_math: false,
     };
     m.preamble(doc);
     let base = Style::default();
     m.node(tree, &base);
     m.out.push_str("#metadata(none) <fmtagno-end>\n");
-    (m.out, m.files, m.warn.list)
+    m
 }
 
 // Word 在节开头和手动分页之后保留段前距，typst 会把页顶的 above 吞掉；放一个零高的块垫着
@@ -168,6 +196,12 @@ struct Markup<'a> {
     margins: [f32; 4],
     /// 当前节版心（一栏）的宽度，pt；auto 列和比例列混写时用来分宽度
     content_width: f32,
+    /// 正在排的元素 id，公式出错时报给用户
+    cur_id: String,
+    /// 公式一律显示 LaTeX 原文
+    math_fallback: bool,
+    /// 文档里有没有公式
+    had_math: bool,
 }
 
 impl Markup<'_> {
@@ -199,10 +233,45 @@ impl Markup<'_> {
         let _ = writeln!(o, "#set figure(numbering: none)");
         // 标题的外观全由样式决定，heading 只留着生成书签
         let _ = writeln!(o, "#show heading: it => it.body");
+        // 公式用 typst 自带的 New Computer Modern Math，\\text 里的中文往后找正文字体
+        let mut mf = vec![MATH_FONT];
+        mf.extend(FONTS);
+        let _ = writeln!(o, "#show math.equation: set text(font: {})", lits(&mf));
+    }
+
+    /// 公式转成 Typst：行内 `$…$`，块级 `$display(…)$`。转不了就显示 LaTeX 原文。
+    fn math_src(&mut self, latex: &str, block: bool) -> String {
+        self.had_math = true;
+        let raw =
+            |latex: &str| format!("#text(font: {})[#{}]", lits(MONO_FONTS), lit(latex.trim()));
+        if self.math_fallback {
+            return raw(latex);
+        }
+        match crate::math::parse(latex, block) {
+            Ok(root) => {
+                let mut t = crate::math::Typst::new();
+                let body = t.math(&root);
+                self.warn
+                    .math_partial(FORMAT, &self.cur_id, latex, &t.unsupported);
+                if body.trim().is_empty() {
+                    String::new()
+                } else if block {
+                    format!("$display({body})$")
+                } else {
+                    format!("${body}$")
+                }
+            }
+            Err(e) => {
+                let id = self.cur_id.clone();
+                self.warn.math_failed(FORMAT, &id, latex, &e);
+                raw(latex)
+            }
+        }
     }
 
     fn node(&mut self, n: &Node, parent: &Style) {
         let s = &n.style;
+        self.cur_id = n.id.clone();
         match &n.component {
             Component::Document(_) => {
                 let body = self.children_src(n);
@@ -266,6 +335,17 @@ impl Markup<'_> {
             Component::Divider(_) => self.block(String::new(), s, parent, &n.id),
             Component::TableOfContents(p) => self.toc(n, p, parent),
             Component::Code(p) => self.code(n, p, parent),
+            Component::Math(p) => {
+                let eq = self.math_src(&p.latex, true);
+                let body = match &p.number {
+                    Some(no) => format!(
+                        "#grid(columns: (1fr, auto, 1fr), align: (horizon, horizon, right + horizon), [], [{eq}], [#{}])",
+                        lit(&format!("({no})"))
+                    ),
+                    None => format!("#par[{eq}]"),
+                };
+                self.block(body, s, parent, &n.id);
+            }
             Component::List(p) => self.list(n, p, parent),
             Component::Table(p) => self.table(n, p, parent),
             Component::Image(p) => self.image(n, p, parent),
@@ -665,7 +745,15 @@ impl Markup<'_> {
             };
             let _ = write!(piece, "#context str(fmtagno-info().{key})");
         }
-        for (i, line) in r.text.split('\n').enumerate().filter(|_| r.field.is_none()) {
+        if r.is_math() {
+            piece = self.math_src(&r.text, false);
+        }
+        for (i, line) in r
+            .text
+            .split('\n')
+            .enumerate()
+            .filter(|_| r.field.is_none() && !r.is_math())
+        {
             if i > 0 {
                 piece.push_str("#linebreak()");
             }

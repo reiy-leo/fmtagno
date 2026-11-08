@@ -103,6 +103,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         ind_chars: Vec::new(),
         sections: Vec::new(),
         root: tree.clone(),
+        maths: Vec::new(),
     };
     r.node(tree);
     let sections = std::mem::take(&mut r.sections);
@@ -219,6 +220,12 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         *h = mark_behind(h);
         *h = fix_ind_chars(h, &r.ind_chars);
     }
+    if !r.maths.is_empty() {
+        xml.document = inject_math(&xml.document, &r.maths, &mut r.warn);
+        for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
+            *h = inject_math(h, &r.maths, &mut r.warn);
+        }
+    }
     fix_part_rels(
         &xml.headers,
         &mut xml.header_rels,
@@ -246,6 +253,123 @@ fn page_margin(page: &Page) -> PageMargin {
         .header(units::twip(hd))
         .footer(units::twip(fd))
         .gutter(0)
+}
+
+/// 一个公式：先在文档里放一个写着记号的 run，生成 XML 后换成 OMML（docx-rs 不会写公式）。
+struct MathSlot {
+    id: String,
+    latex: String,
+    /// 块级公式（m:oMathPara），否则是行内（m:oMath）
+    block: bool,
+    /// 块级公式的对齐：left、center、right
+    jc: &'static str,
+}
+
+const MATH_OPEN: char = '\u{E000}';
+const MATH_CLOSE: char = '\u{E001}';
+const MATH_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+
+fn math_marker(i: usize) -> String {
+    format!("{MATH_OPEN}fmtagno-math-{i}{MATH_CLOSE}")
+}
+
+/// 把写着公式记号的 run 换成 OMML。公式的字号、颜色从这个 run 的 w:rPr 里取，
+/// 字体换成 Cambria Math。根元素上没有 m 命名空间时补上。
+fn inject_math(xml: &[u8], slots: &[MathSlot], warn: &mut Warn) -> Vec<u8> {
+    let s = String::from_utf8_lossy(xml);
+    if !s.contains(MATH_OPEN) {
+        return xml.to_vec();
+    }
+    let mut out = String::with_capacity(s.len() + 1024);
+    let mut rest: &str = &s;
+    let open_len = MATH_OPEN.len_utf8();
+    while let Some(m) = rest.find(MATH_OPEN) {
+        let Some(m_end) = rest[m..].find(MATH_CLOSE).map(|j| m + j) else {
+            break;
+        };
+        let idx: Option<usize> = rest[m + open_len..m_end]
+            .strip_prefix("fmtagno-math-")
+            .and_then(|x| x.parse().ok());
+        let start = [rest[..m].rfind("<w:r>"), rest[..m].rfind("<w:r ")]
+            .into_iter()
+            .flatten()
+            .max();
+        let end = rest[m_end..]
+            .find("</w:r>")
+            .map(|j| m_end + j + "</w:r>".len());
+        let (Some(idx), Some(start), Some(end)) = (idx, start, end) else {
+            break;
+        };
+        let Some(slot) = slots.get(idx) else { break };
+        let run = &rest[start..end];
+        out.push_str(&rest[..start]);
+        let rpr = run
+            .find("<w:rPr>")
+            .and_then(|i| run[i..].find("</w:rPr>").map(|j| &run[i..i + j]))
+            .unwrap_or("");
+        match crate::math::parse(&slot.latex, slot.block) {
+            Ok(root) => {
+                let mrpr = math_rpr(rpr);
+                let mut o = crate::math::Omml::new(&mrpr);
+                let x = if slot.block {
+                    o.block(&root, slot.jc)
+                } else {
+                    o.inline(&root)
+                };
+                warn.math_partial(FORMAT, &slot.id, &slot.latex, &o.unsupported);
+                out.push_str(&x);
+            }
+            Err(e) => {
+                warn.math_failed(FORMAT, &slot.id, &slot.latex, &e);
+                let marker = math_marker(idx);
+                out.push_str(&run.replace(&marker, &xml_text(&slot.latex)));
+            }
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    // 根元素补上 m 命名空间
+    if !out.contains("xmlns:m=")
+        && let Some(i) = ["<w:document", "<w:hdr", "<w:ftr"]
+            .iter()
+            .find_map(|t| out.find(t).map(|i| i + t.len()))
+    {
+        out.insert_str(i, &format!(" xmlns:m=\"{MATH_NS}\""));
+    }
+    out.into_bytes()
+}
+
+fn xml_text(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// 公式里每个 m:r 用的 w:rPr：只留粗体、颜色、字号，字体用 Cambria Math。
+fn math_rpr(rpr: &str) -> String {
+    let take = |name: &str| -> Option<String> {
+        let k = format!("<w:{name}");
+        let mut from = 0;
+        while let Some(i) = rpr[from..].find(&k).map(|i| from + i) {
+            let after = &rpr[i + k.len()..];
+            if after.starts_with([' ', '/', '>']) {
+                let j = after.find("/>")?;
+                return Some(rpr[i..i + k.len() + j + 2].to_string());
+            }
+            from = i + k.len();
+        }
+        None
+    };
+    let mut o = String::from(
+        "<w:rPr><w:rFonts w:ascii=\"Cambria Math\" w:hAnsi=\"Cambria Math\" w:cs=\"Cambria Math\" />",
+    );
+    for name in ["b", "color", "sz", "szCs"] {
+        if let Some(e) = take(name) {
+            o.push_str(&e);
+        }
+    }
+    o.push_str("</w:rPr>");
+    o
 }
 
 /// 一节要写的页眉页脚。
@@ -589,9 +713,62 @@ struct Ctx<'a> {
     sections: Vec<(SectionLayout, Vec<Block>)>,
     /// 整棵树，目录要从里面收标题
     root: Node,
+    /// 公式，按记号里的序号排
+    maths: Vec<MathSlot>,
 }
 
 impl Ctx<'_> {
+    /// 登记一个公式，返回占位 run 里要写的记号。
+    fn math_slot(&mut self, id: &str, latex: &str, block: bool, jc: &'static str) -> String {
+        self.maths.push(MathSlot {
+            id: id.to_string(),
+            latex: latex.to_string(),
+            block,
+            jc,
+        });
+        math_marker(self.maths.len() - 1)
+    }
+
+    /// 块级公式：单独一段。带编号时用居中制表位放公式、右对齐制表位放编号，
+    /// 这时公式按行内公式排。
+    fn math_block(&mut self, n: &Node, p: &crate::components::MathProps) {
+        let s = &n.style;
+        let ts = s.text_only_no_bg();
+        match &p.number {
+            None => {
+                let jc = match s.align {
+                    Some(Align::Left) => "left",
+                    Some(Align::Right) => "right",
+                    _ => "center",
+                };
+                let mark = self.math_slot(&n.id, &p.latex, true, jc);
+                let para = self.para(Paragraph::new(), s, &n.id);
+                let run = self.run_props(Run::new().add_text(&mark), &ts, &n.id);
+                self.blocks.push(Block::P(para.add_run(run)));
+            }
+            Some(no) => {
+                let mut ls = s.clone();
+                ls.align = Some(Align::Left);
+                let w = units::twip(self.content_width_pt).max(0) as usize;
+                let mark = self.math_slot(&n.id, &p.latex, false, "center");
+                let para = self
+                    .para(Paragraph::new(), &ls, &n.id)
+                    .add_tab(
+                        docx_rs::Tab::new()
+                            .val(docx_rs::TabValueType::Center)
+                            .pos(w / 2),
+                    )
+                    .add_tab(docx_rs::Tab::new().val(docx_rs::TabValueType::Right).pos(w));
+                let tab1 = self.run_props(Run::new().add_tab(), &ts, &n.id);
+                let eq = self.run_props(Run::new().add_text(&mark), &ts, &n.id);
+                let tab2 = self.run_props(Run::new().add_tab(), &ts, &n.id);
+                let num = self.run_props(Run::new().add_text(format!("({no})")), &ts, &n.id);
+                let para = para.add_run(tab1).add_run(eq).add_run(tab2).add_run(num);
+                self.blocks.push(Block::P(para));
+            }
+        }
+    }
+
     fn node(&mut self, n: &Node) {
         let s = &n.style;
         match &n.component {
@@ -643,6 +820,7 @@ impl Ctx<'_> {
             }
             Component::TableOfContents(p) => self.toc(n, p),
             Component::Code(p) => self.code(n, p),
+            Component::Math(p) => self.math_block(n, p),
             Component::List(p) => self.list(n, p),
             Component::Table(p) => self.table(n, p),
             Component::Image(p) => self.image(n, p),
@@ -1498,6 +1676,13 @@ impl Ctx<'_> {
                 if let Some(pic) = self.inline_pic(id, src, r.width, r.height) {
                     p = p.add_run(Run::new().add_image(pic));
                 }
+                continue;
+            }
+            if r.is_math() {
+                // 公式里放不了链接（OMML 不能套在 w:hyperlink 里），只放公式
+                let mark = self.math_slot(id, &r.text, false, "center");
+                let run = self.run_props(Run::new().add_text(&mark), s, id);
+                p = p.add_run(run);
                 continue;
             }
             if let Some(f) = r.field {

@@ -408,7 +408,7 @@ impl Sheet {
         Ok((s, parts))
     }
 
-    /// 算一个 run 的文字样式：段落样式 → 行内代码样式 → 链接默认 → 简写 → run 的 style。
+    /// 算一个 run 的文字样式：段落样式 → 行内代码（行内公式）样式 → 链接默认 → 简写 → run 的 style。
     pub fn run(&self, r: &Run, para: &Style) -> Result<Style> {
         let mut s = para.text_only();
         s.background = None;
@@ -419,6 +419,11 @@ impl Sheet {
             if let Some(c) = self.comp("InlineCode") {
                 s.merge(c);
             }
+        }
+        if r.is_math()
+            && let Some(c) = self.comp("InlineMath")
+        {
+            s.merge(c);
         }
         if r.href.is_some() {
             if r.color.is_none() {
@@ -526,6 +531,7 @@ fn builtin(key: &str) -> Option<&'static Style> {
             "Slide.title": { "fontSize": 20, "bold": true },
             "Divider": { "borderBottom": "0.5pt solid #D0D7DE", "lineHeight": "1pt", "spaceBefore": 6, "spaceAfter": 12 },
             "Quote": { "borderLeft": "3pt solid #D0D7DE", "paddingLeft": 10, "color": "#57606A", "spaceAfter": 8 },
+            "Math": { "align": "center", "spaceBefore": 6, "spaceAfter": 6 },
             "Callout": { "background": "#F6F8FA", "border": "0.5pt solid #E1E4E8", "padding": 8, "spaceAfter": 8 },
             "TableOfContents": { "spaceAfter": 12 },
             "TableOfContents.title": { "fontSize": 14, "bold": true, "spaceAfter": 6 },
