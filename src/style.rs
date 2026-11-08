@@ -509,6 +509,8 @@ impl LineHeight {
     fn to_value(self) -> Value {
         match self {
             LineHeight::Multiple(x) => serde_json::json!(x),
+            // 固定值的 pt 要带单位写，光写数字读回来会当成倍数
+            LineHeight::Exact(Len::Pt(v)) => format!("{v}pt").into(),
             LineHeight::Exact(l) => l.to_value(),
             LineHeight::AtLeast(l) => serde_json::json!({ "atLeast": l.to_value() }),
         }
