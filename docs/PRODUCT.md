@@ -17,6 +17,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。
   - `fmtagno render doc.json -o out.docx`：按输出文件的扩展名选格式。
   - `fmtagno check doc.json`：只校验，不出文件。
   - `fmtagno catalog`：列出能用的组件，加 `--json` 输出 schema。
+  - `fmtagno parse doc.docx -o doc.json`：反过来，从 Word 文档解析出 JSON，图片导到 `doc.assets/`。见下面「从 docx 解析」。
   - 输入写 `-` 从标准输入读；输出写 `-` 时配 `--format` 写到标准输出。
   - `fmtagno mcp`：以 MCP server 方式运行（stdio）。
 - MCP 工具：`render`（JSON 进，文件出）、`check`、`list_components`（带每个组件的 props 说明，方便 AI 写对）。
@@ -29,7 +30,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。
 
 ## 不做
 
-- 不把 docx、pdf 解析回 JSON。
+- 不把 pdf 解析回 JSON。docx 能解析，范围见「从 docx 解析」。
 - 不做 Rust 插件。自定义组件只能拼内置组件。
 - 不做图形界面，不做网站。
 - 不依赖 LibreOffice 或 Word。
@@ -98,6 +99,47 @@ html 默认是一长条网页，分页和表头重复只在打印时出现。加
 - 显示页眉页脚，填好页码。排完版后 `<html>` 上会有 `data-fmtagno-ready="1"`，截图或打印的脚本可以等它。
 - 屏幕上横竖混排没问题，打印时只用第一节的纸张。
 - 文件会大 500 KB 左右，打开时要等脚本排完版。
+
+## 从 docx 解析
+
+`fmtagno parse` 把一份 .docx 读成 fmtagno 的 JSON，格式和 render 的输入一样（扁平 elements 加 root）。拿到 JSON 后可以改内容、换样式集，再 render 成 docx、pdf、html。
+
+```sh
+fmtagno parse report.docx -o report.json      # 图片导到 report.assets/
+fmtagno parse report.docx > report.json       # 不写 -o 时输出到标准输出，图片导到当前目录的 report.assets/
+fmtagno parse report.docx -o out/report.json --assets img   # 图片导到 out/img/
+```
+
+目标是 parse 完再 render 回 docx，看起来基本一样。认不出、表达不了的内容在标准错误里给警告，不会中断。
+
+能解析的：
+
+- 标题：段落样式是「标题 1」到「标题 6」（或样式里写了大纲级别）的段落，变成 Heading。
+- 正文和行内样式：字体、字号、颜色、粗体、斜体、下划线、删除线、上下标、大小写、字间距、缩放、高亮、底纹、着重号、隐藏；链接（超链接和 HYPERLINK 域）；行内代码（字符样式叫 InlineCode 的）。
+- 段落格式：对齐、段前段后、行距、缩进（按字符计的写成 em）、与下段同页、段中不分页、段前分页、孤行控制、边框和底纹。
+- 列表：numbering.xml 里的编号变成 List，有序无序、嵌套、每一级的编号类型、编号模板、起始编号、缩进、编号颜色和字号。
+- 表格：合并格（gridSpan、vMerge）、列宽、行高、每格的底纹、边框、对齐、竖排、边距；第一行设了「标题行重复」并且每格都有底纹时变成表头 columns。
+- 图片：行内图片和单独一段的图片（Image），图片文件导到 JSON 旁边的目录，JSON 里写相对路径；浮动图片按位置写成 float 或 absolute。
+- 分节：纸张大小和方向、页边距、页眉页脚距离、分栏、首页不同、奇偶页不同、页码起始值。第一节写在 `meta.page`，后面每节一个 Section。
+- 页眉页脚、页码（PAGE、NUMPAGES、SECTIONPAGES 域）、分页符、目录（TOC 域变回 TableOfContents）。
+- 边框：Word 的 25 种线型都换回 STYLE.md 里的名字，`single` 写成 `solid`。
+- 公式：OMML 转成 LaTeX，单独一段的变成 Math（带编号的也认），夹在文字里的变成 InlineMath。认不出的结构给警告，只留文字。
+
+样式是这样处理的：
+
+- 先按 Word 的规则算出每段、每个 run 实际用的格式，再只写和「不写时会是什么」不一样的字段，所以 JSON 不会每段都带一大串样式。
+- 大多数正文段落共用的字体、字号、行距写进 `styles` 的 `Document`；正文的段前段后、首行缩进写进 `Text`；各级标题写进 `Heading.1` 这些键。
+- 其他用到的 Word 段落样式和字符样式写成同名的命名样式（和组件名重名时前面加 `Word `），元素用 `style` 引用。
+- 字体一律写英文族名：宋体写成 SimSun，微软雅黑写成 Microsoft YaHei，主题字体换成主题里的实际字体。
+
+还不支持、会给警告的：
+
+- 文本框、形状、艺术字、图表、SmartArt；嵌入对象（比如 MathType 公式）只留预览图。
+- 脚注、尾注、批注、修订（已删除的文字不要，插入的文字照常保留）。
+- 制表位（制表符原样留在文字里）、分栏符、页面垂直对齐、页码格式（罗马数字这些）、连续分节。
+- 表格样式里的条件格式（首行、隔行这些），表格整体居中，格子斜线，表格里套的表格（文字接在格子里）。
+- Word 的「多倍行距」按 fmtagno 的倍数（字号 × 倍数）理解，渲染回去行距会比原文档紧一点。
+- 渲染器本来就表达不了的东西读回来也一样：比如同一级列表在 Word 里只有一种编号定义，图片的替代文字 docx 渲染时没写。
 
 ## 自定义组件
 

@@ -4,7 +4,7 @@ fmtagno：一份 JSON，按注册好的组件渲染成 docx、pdf、html（第�
 
 ## 边界
 
-- 只做 JSON 到文档这一个方向，不解析回 JSON。
+- 主要是 JSON 到文档这个方向。反方向只做 docx 解析回 JSON（`fmtagno parse`，见 docs/PRODUCT.md「从 docx 解析」），不解析 pdf。
 - 自定义组件只能用内置组件拼，不做 Rust 插件。
 - 不依赖 LibreOffice、Word 等外部程序。
 
@@ -27,6 +27,7 @@ src/math.rs         公式：LaTeX 经 math-core 转 MathML，再转成 OMML（d
 src/cascade.rs      样式层叠：样式集、组件样式、部位、继承
 src/custom.rs       自定义组件：定义、校验、展开
 src/render/         各格式渲染器：html、docx、pdf（Typst）、markdown；common.rs 放列表编号、表格部位这类共用计算
+src/parse/          docx 解析回 JSON：word.rs 读样式表、编号、w:rPr / w:pPr，table.rs 读表格，omml.rs 把公式转成 LaTeX
 tests/              集成测试
 examples/       示例文档；examples/catalog/ 是示例组件定义
 docs/           产品说明和设计文档

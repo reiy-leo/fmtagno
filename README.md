@@ -14,6 +14,7 @@ fmtagno render report.json -o report.pdf
 fmtagno render report.json -o report.md     # Markdown，只留结构
 fmtagno render report.json -o report.html --paged   # 屏幕上按页显示
 fmtagno check report.json
+fmtagno parse report.docx -o report.json     # 反过来，从 Word 解析出 JSON，图片在 report.assets/
 fmtagno render report.json -o report.html --catalog my-components/ --style-sets themes/ --style-set formal
 fmtagno mcp
 ```
