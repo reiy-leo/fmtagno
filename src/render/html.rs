@@ -10,7 +10,7 @@ use crate::{
         CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableOfContentsProps,
         TableProps,
     },
-    doc::{Doc, Node, SectionLayout},
+    doc::{Doc, Node, PageNumberFormat, SectionLayout},
     render::{
         Options, Output,
         common::{self, Grid, Warn},
@@ -119,6 +119,7 @@ math { font-family: \"STIX Two Math\", \"Cambria Math\", \"Latin Modern Math\", 
 .fmtagno-marker { display: inline-block; white-space: nowrap; }
 .fmtagno-ln { display: inline-block; min-width: 2.5em; color: #999; user-select: none; }
 .fmtagno-pagebreak { break-after: page; }
+.fmtagno-colbreak + * { break-before: column; }
 .fmtagno-section + .fmtagno-section { break-before: page; }
 .fmtagno-slide { aspect-ratio: 16 / 9; border: 1px solid #ddd; border-radius: 6px; padding: 2rem 3rem; \
 margin: 1.5rem 0; overflow: hidden; break-inside: avoid; break-after: page; position: relative; }
@@ -179,8 +180,37 @@ const PAGED_CSS: &str = "<style data-pagedjs-ignore>
 
 /// 页眉页脚和页码：Paged.js 排完所有页后，按每页属于哪节、是不是本节首页、页码奇偶，
 /// 把对应的 <template> 内容放进页面的边距里，再填好页码域。
-/// 页码按 Word 的规则自己数：每节接着上一节数，写了 data-page-start 就从那个数重新开始。
-const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
+/// 页码按 Word 的规则自己数：每节接着上一节数，写了 data-page-start 就从那个数重新开始；
+/// data-page-fmt 是页码格式（Word 的写法，跟 Rust 里 PageNumberFormat::format 一致）。
+const PAGED_HF: &str = r#"function fmtagnoNum(n, fmt) {
+  if (!fmt || n < 1) return String(n);
+  if (fmt === 'lowerRoman' || fmt === 'upperRoman') {
+    const t = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
+    let r = '', m = n;
+    for (const [v, s] of t) while (m >= v) { r += s; m -= v; }
+    return fmt === 'lowerRoman' ? r.toLowerCase() : r;
+  }
+  if (fmt === 'lowerLetter' || fmt === 'upperLetter') {
+    const c = String.fromCharCode((fmt === 'lowerLetter' ? 97 : 65) + (n - 1) % 26);
+    return c.repeat(Math.floor((n - 1) / 26) + 1);
+  }
+  if (fmt === 'chineseCounting' && n < 10000) {
+    const d = '〇一二三四五六七八九', u = ['', '十', '百', '千'];
+    const ds = String(n).split('').map(Number);
+    let r = '', zero = false;
+    ds.forEach((x, i) => {
+      const k = ds.length - 1 - i;
+      if (x === 0) { zero = true; return; }
+      if (zero && r) r += d[0];
+      zero = false;
+      if (!(x === 1 && k === 1 && i === 0)) r += d[x];
+      r += u[k];
+    });
+    return r;
+  }
+  return String(n);
+}
+class FmtagnoHeaders extends Paged.Handler {
   beforeParsed(content) {
     this.tpls = {};
     for (const t of content.querySelectorAll('template.fmtagno-hf')) {
@@ -198,7 +228,7 @@ const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
       if (!cur || id !== cur.id) {
         const start = s && s.dataset.pageStart ? +s.dataset.pageStart
           : (cur ? cur.num + (i - cur.page) : 1);
-        cur = { id, page: i, num: start, el: s, count: 0 };
+        cur = { id, page: i, num: start, el: s, count: 0, fmt: s ? s.dataset.pageFmt : undefined };
         first = true;
       }
       cur.count++;
@@ -207,7 +237,8 @@ const PAGED_HF: &str = r#"class FmtagnoHeaders extends Paged.Handler {
     const fill = (root, x) => {
       for (const f of root.querySelectorAll('.fmtagno-field')) {
         const k = f.dataset.field;
-        f.textContent = k === 'page' ? x.num : k === 'pages' ? pages.length : x.sec.count;
+        // 跟 Word 一样，只有页码按节的格式显示，总页数和本节页数都是阿拉伯数字
+        f.textContent = k === 'page' ? fmtagnoNum(x.num, x.sec.fmt) : k === 'pages' ? pages.length : x.sec.count;
       }
     };
     for (const x of info) {
@@ -389,6 +420,12 @@ impl Html<'_> {
                     "<div class=\"fmtagno-pagebreak\" id=\"{id}\"></div>"
                 );
             }
+            Component::ColumnBreak(_) => {
+                let _ = writeln!(
+                    self.out,
+                    "<div class=\"fmtagno-colbreak\" id=\"{id}\"></div>"
+                );
+            }
             Component::Section(p) => self.section(n, p.layout(), parent, &st),
         }
     }
@@ -434,6 +471,13 @@ impl Html<'_> {
         );
         if let Some(x) = lay.page_number_start {
             let _ = write!(attrs, " data-page-start=\"{x}\"");
+        }
+        if let Some(f) = lay
+            .page
+            .page_number_format
+            .filter(|f| *f != PageNumberFormat::Decimal)
+        {
+            let _ = write!(attrs, " data-page-fmt=\"{}\"", f.word());
         }
         if lay.title_page {
             attrs.push_str(" data-title-page");
@@ -1192,7 +1236,7 @@ impl Html<'_> {
             o.push_str("display:none;");
         }
         if ctx == Ctx::Inline {
-            if let Some(bg) = &s.background {
+            if let Some(bg) = s.bg() {
                 let _ = write!(
                     o,
                     "background:{};border-radius:2px;padding:0 0.2em;",
@@ -1292,7 +1336,7 @@ impl Html<'_> {
                 }
             }
         }
-        if let Some(bg) = &s.background {
+        if let Some(bg) = s.bg() {
             let _ = write!(o, "background:{};", bg_css(bg));
         }
         if ctx != Ctx::Table {

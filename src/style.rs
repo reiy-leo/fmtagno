@@ -698,6 +698,8 @@ pub const PATTERNS: &[&str] = &[
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Background {
+    /// `"none"`：不画底色，用来去掉继承来的或内置的底色（比如表头的灰底）
+    None,
     Color(Color),
     /// 底纹：`pattern` 用 `color` 画在 `fill` 上
     Pattern {
@@ -715,6 +717,7 @@ pub enum Background {
 impl Background {
     fn from_value(v: &Value) -> Result<Background> {
         match v {
+            Value::String(s) if s.trim() == "none" => Ok(Background::None),
             Value::String(s) => Ok(Background::Color(Color::parse(s)?)),
             Value::Object(m) if m.contains_key("pattern") => {
                 let pattern = m["pattern"].as_str().unwrap_or("").to_string();
@@ -765,13 +768,14 @@ impl Background {
                 })
             }
             _ => bail!(
-                "background 写颜色、{{ pattern, color, fill }} 或 {{ gradient, angle, stops }}"
+                "background 写颜色、\"none\"、{{ pattern, color, fill }} 或 {{ gradient, angle, stops }}"
             ),
         }
     }
 
     fn to_value(&self) -> Value {
         match self {
+            Background::None => "none".into(),
             Background::Color(c) => c.to_value(),
             Background::Pattern {
                 pattern,
@@ -790,6 +794,8 @@ impl Background {
     /// 只能用纯色的格式：底纹按深浅混色，渐变取第一个颜色。
     pub fn solid(&self) -> Color {
         match self {
+            // 用到时应该已经被 Style::bg 滤掉了，万一漏了按白色
+            Background::None => Color("FFFFFF".into()),
             Background::Color(c) => c.clone(),
             Background::Pattern {
                 pattern,
@@ -1444,8 +1450,15 @@ impl Style {
         one.or(self.padding).map(|l| l.pt(self.size_pt(), 0.0))
     }
 
+    /// 要画的底色：没写或写了 `"none"` 都是 None。渲染器都用它，不直接读 background。
+    pub fn bg(&self) -> Option<&Background> {
+        self.background
+            .as_ref()
+            .filter(|b| !matches!(b, Background::None))
+    }
+
     pub fn has_box(&self) -> bool {
-        self.background.is_some()
+        self.bg().is_some()
             || Edge::ALL.iter().any(|e| self.border_side(*e).is_some())
             || Edge::ALL.iter().any(|e| self.padding_side(*e).is_some())
     }

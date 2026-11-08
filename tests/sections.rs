@@ -113,3 +113,115 @@ fn rejects_bad_sections() {
     let missing = r#"{"meta":{"page":{"footer":{"first":"nope"}}},"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Text","props":{"text":"a"}}}}"#;
     assert!(err(missing).contains("`nope` 不存在"));
 }
+
+// ---------- 页码格式、分栏符 ----------
+
+const FRONT: &str = include_str!("../examples/frontmatter.json");
+
+#[test]
+fn page_number_format_writes_numbers_like_word() {
+    use fmtagno::doc::PageNumberFormat as F;
+    let cases: &[(F, i64, &str)] = &[
+        (F::Decimal, 12, "12"),
+        (F::LowerRoman, 4, "iv"),
+        (F::LowerRoman, 9, "ix"),
+        (F::UpperRoman, 1994, "MCMXCIV"),
+        (F::LowerLetter, 1, "a"),
+        (F::LowerLetter, 26, "z"),
+        // Word 过了 z 重复字母，不是 aa, ab
+        (F::LowerLetter, 27, "aa"),
+        (F::UpperLetter, 28, "BB"),
+        (F::ChineseCounting, 1, "一"),
+        (F::ChineseCounting, 10, "十"),
+        (F::ChineseCounting, 11, "十一"),
+        (F::ChineseCounting, 20, "二十"),
+        (F::ChineseCounting, 101, "一百〇一"),
+        (F::ChineseCounting, 110, "一百一十"),
+        // 0 没有罗马数字写法，照阿拉伯数字
+        (F::UpperRoman, 0, "0"),
+    ];
+    for (f, n, want) in cases {
+        assert_eq!(f.format(*n), *want, "{f:?} {n}");
+    }
+    for f in F::ALL {
+        assert_eq!(F::from_word(f.word()), Some(f));
+    }
+    assert_eq!(F::from_word("ordinal"), None);
+}
+
+#[test]
+fn docx_writes_page_number_format_and_column_break() {
+    let x = render(FRONT, Format::Docx);
+    assert!(
+        x.contains(r#"<w:pgNumType w:fmt="lowerRoman" w:start="1" />"#),
+        "前言"
+    );
+    assert!(
+        x.contains(r#"<w:pgNumType w:fmt="upperLetter" w:start="1" />"#),
+        "附录 A"
+    );
+    assert!(
+        x.contains(r#"<w:pgNumType w:fmt="chineseCounting" w:start="11" />"#),
+        "附录 B"
+    );
+    // 正文写的是 decimal，不写 w:fmt
+    assert_eq!(count(&x, "w:fmt="), 3);
+    assert!(x.contains(r#"<w:pgNumType w:start="1" />"#), "正文");
+    assert_eq!(count(&x, r#"<w:br w:type="column" />"#), 1);
+}
+
+#[test]
+fn page_number_format_carries_over_to_next_section() {
+    // 第二节没写 pageNumberFormat，沿用第一节的 upperRoman
+    let json = r#"{"meta":{"page":{"pageNumberFormat":"upperRoman"}},"root":"d","elements":{"d":{"type":"Document","children":["s1","s2"]},"s1":{"type":"Section","children":["a"]},"s2":{"type":"Section","props":{"pageNumberStart":1},"children":["b"]},"a":{"type":"Text","props":{"text":"a"}},"b":{"type":"Text","props":{"text":"b"}}}}"#;
+    let x = render(json, Format::Docx);
+    assert_eq!(count(&x, r#"w:fmt="upperRoman""#), 2);
+    let h = render(json, Format::Html);
+    assert_eq!(count(&h, r#"data-page-fmt="upperRoman""#), 2);
+}
+
+#[test]
+fn pdf_numbers_pages_by_format_and_breaks_columns() {
+    let (d, tree) = fmtagno::prepare(FRONT, &fmtagno::Env::default()).unwrap();
+    let (src, _, _) = fmtagno::render::pdf::markup(&d, &tree, &Default::default());
+    assert!(src.contains(r#"#metadata((start: 1, fmt: "i")) <fmtagno-sec>"#));
+    assert!(src.contains(r#"#metadata((start: 1, fmt: "1")) <fmtagno-sec>"#));
+    assert!(src.contains(r#"#metadata((start: 1, fmt: "A")) <fmtagno-sec>"#));
+    assert!(src.contains(r#"#metadata((start: 11, fmt: "一")) <fmtagno-sec>"#));
+    assert_eq!(count(&src, "#colbreak()"), 1);
+    // 只有 PAGE 跟格式，总页数和本节页数是阿拉伯数字
+    assert!(src.contains("fmtagno-info().page-text"));
+    assert!(src.contains("fmtagno-info().total"));
+    let out = fmtagno::render_str(FRONT, Format::Pdf, None).unwrap();
+    assert!(out.bytes.starts_with(b"%PDF-"));
+    assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+}
+
+#[test]
+fn html_marks_page_format_and_column_break() {
+    let x = render(FRONT, Format::Html);
+    assert!(x.contains(r#"data-page-fmt="lowerRoman""#));
+    assert!(x.contains(r#"data-page-fmt="upperLetter""#));
+    assert!(x.contains(r#"data-page-fmt="chineseCounting""#));
+    assert_eq!(count(&x, "data-page-fmt="), 3);
+    assert!(x.contains(r#"<div class="fmtagno-colbreak" id="a-cb"></div>"#));
+    assert!(x.contains(".fmtagno-colbreak + * { break-before: column; }"));
+    let paged = fmtagno::render::render(
+        &fmtagno::prepare(FRONT, &fmtagno::Env::default()).unwrap().0,
+        &fmtagno::prepare(FRONT, &fmtagno::Env::default()).unwrap().1,
+        Format::Html,
+        &fmtagno::render::Options {
+            paged: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let p = String::from_utf8(paged.bytes).unwrap();
+    assert!(p.contains("fmtagnoNum(x.num, x.sec.fmt)"));
+}
+
+#[test]
+fn column_break_not_allowed_in_header() {
+    let cb = r#"{"meta":{"page":{"header":"h"}},"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Text","props":{"text":"a"}},"h":{"type":"Document","children":["c"]},"c":{"type":"ColumnBreak"}}}"#;
+    assert!(err(cb).contains("页眉页脚里不能放 ColumnBreak"));
+}

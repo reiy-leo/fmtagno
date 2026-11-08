@@ -131,6 +131,7 @@ impl Md<'_> {
             Component::Table(p) => self.table(n, p),
             Component::Image(p) => self.image(p),
             Component::PageBreak(_) => self.drop_once("PageBreak（分页）", &n.id),
+            Component::ColumnBreak(_) => self.drop_once("ColumnBreak（分栏符）", &n.id),
         }
     }
 

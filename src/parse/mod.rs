@@ -18,6 +18,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cascade::builtin;
 use crate::components::Field;
+use crate::doc::PageNumberFormat;
 use crate::style::{self, Len, ListStyleType, Style};
 use word::{
     A, Lvl, M, Numbering, PPr, R, Styles, Theme, V, W, WP, child, child_ns, is, isw, round2, wa,
@@ -184,6 +185,14 @@ enum Seg {
         style: Style,
     },
     PageBreak,
+    ColumnBreak,
+}
+
+impl Seg {
+    /// 分页符或分栏符：段落在这里拆开，中间放 PageBreak / ColumnBreak 元素。
+    fn is_break(&self) -> bool {
+        matches!(self, Seg::PageBreak | Seg::ColumnBreak)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +254,7 @@ struct Sect {
     cols: Option<(u8, f32)>,
     title_pg: bool,
     pg_start: Option<u32>,
+    pg_fmt: PageNumberFormat,
     headers: Vec<(String, String)>,
     footers: Vec<(String, String)>,
 }
@@ -845,11 +855,14 @@ impl Ctx {
         }
         if let Some(p) = child(n, "pgNumType") {
             s.pg_start = f(Some(p), "start").map(|x| x as u32);
-            if let Some(fmt) = wa(p, "fmt").filter(|x| *x != "decimal") {
-                self.warns.once(
-                    "pgfmt",
-                    format!("页码格式 `{fmt}` 没保留，按阿拉伯数字处理"),
-                );
+            if let Some(fmt) = wa(p, "fmt") {
+                match PageNumberFormat::from_word(fmt) {
+                    Some(f) => s.pg_fmt = f,
+                    None => self.warns.once(
+                        &format!("pgfmt:{fmt}"),
+                        format!("不认识的页码格式 `{fmt}`，按阿拉伯数字处理"),
+                    ),
+                }
             }
         }
         if let Some(t) = child(n, "type").and_then(wval)
@@ -1090,19 +1103,24 @@ impl Ctx {
             return;
         }
         // 按分页拆开
-        let has_break = para.segs.iter().any(|s| matches!(s, Seg::PageBreak));
-        let mut chunks: Vec<Vec<Seg>> = vec![Vec::new()];
+        let has_break = para.segs.iter().any(Seg::is_break);
+        // 每块前面的分隔符（第一块没有）
+        let mut chunks: Vec<(Option<&Seg>, Vec<Seg>)> = vec![(None, Vec::new())];
         for s in &para.segs {
-            if matches!(s, Seg::PageBreak) {
-                chunks.push(Vec::new());
+            if s.is_break() {
+                chunks.push((Some(s), Vec::new()));
             } else {
-                chunks.last_mut().unwrap().push(s.clone());
+                chunks.last_mut().unwrap().1.push(s.clone());
             }
         }
-        for (i, chunk) in chunks.into_iter().enumerate() {
-            if i > 0 {
-                let id = self.id("pagebreak");
-                self.add(&id, json!({ "type": "PageBreak" }));
+        for (brk, chunk) in chunks {
+            if let Some(b) = brk {
+                let (name, kind) = match b {
+                    Seg::ColumnBreak => ("colbreak", "ColumnBreak"),
+                    _ => ("pagebreak", "PageBreak"),
+                };
+                let id = self.id(name);
+                self.add(&id, json!({ "type": kind }));
                 out.push(id);
             }
             if chunk.is_empty() && has_break {
@@ -1636,7 +1654,12 @@ impl Ctx {
                         self.warns
                             .once("anchor-inline", "和文字混排的浮动图片改成了行内图片".into());
                     }
-                    json!({ "image": img.src, "width": round2(img.w), "height": round2(img.h) })
+                    let mut v = json!({ "image": img.src, "width": round2(img.w), "height": round2(img.h) });
+                    // 行内图片的替代文字写在 text 里
+                    if !img.alt.is_empty() {
+                        v["text"] = json!(img.alt);
+                    }
+                    v
                 }
                 Seg::Math { latex, style, .. } => {
                     let eff = to_map(&text_of(style));
@@ -1648,7 +1671,7 @@ impl Ctx {
                     }
                     v
                 }
-                Seg::PageBreak => continue,
+                Seg::PageBreak | Seg::ColumnBreak => continue,
             };
             // 和上一段样式一样就拼起来
             if let (Some(prev), Some(cur)) = (runs.last_mut(), Some(&v))
@@ -1901,11 +1924,7 @@ impl Ctx {
                 "tab" | "ptab" => self.push_text(out, "\t", &style, href, code, &cstyle),
                 "br" | "cr" => match wa(c, "type") {
                     Some("page") => self.push_seg(out, Seg::PageBreak),
-                    Some("column") => {
-                        self.warns
-                            .once("colbreak", "分栏符没保留，改成了换行".into());
-                        self.push_text(out, "\n", &style, href, code, &cstyle);
-                    }
+                    Some("column") => self.push_seg(out, Seg::ColumnBreak),
                     _ => self.push_text(out, "\n", &style, href, code, &cstyle),
                 },
                 "noBreakHyphen" => self.push_text(out, "\u{2011}", &style, href, code, &cstyle),
@@ -2202,11 +2221,12 @@ impl Ctx {
             return;
         };
         let Some(src) = self.asset(rid) else { return };
-        let style = n
-            .descendants()
-            .find(|x| is(*x, V, "shape"))
-            .and_then(|s| s.attribute("style"))
-            .unwrap_or("");
+        let shape = n.descendants().find(|x| is(*x, V, "shape"));
+        let style = shape.and_then(|s| s.attribute("style")).unwrap_or("");
+        let alt = shape
+            .and_then(|s| s.attribute("alt"))
+            .unwrap_or("")
+            .to_string();
         let dim = |k: &str| {
             style
                 .split(';')
@@ -2221,7 +2241,7 @@ impl Ctx {
                 src,
                 w,
                 h,
-                alt: String::new(),
+                alt,
                 rotation: None,
                 anchor: None,
             }),
@@ -2602,12 +2622,9 @@ impl Ctx {
         if levels[min_lvl].rpr.bold == Some(true) {
             parts.insert("marker".into(), json!({ "bold": true }));
         }
-        if items
-            .iter()
-            .any(|p| p.segs.iter().any(|s| matches!(s, Seg::PageBreak)))
-        {
+        if items.iter().any(|p| p.segs.iter().any(Seg::is_break)) {
             self.warns
-                .once("listbreak", "列表项里的分页符没保留".into());
+                .once("listbreak", "列表项里的分页符、分栏符没保留".into());
         }
         // 项：按层级嵌套
         struct It {
@@ -2624,12 +2641,7 @@ impl Ctx {
                 .unwrap_or(min_lvl)
                 .max(min_lvl)
                 - min_lvl;
-            let segs: Vec<Seg> = p
-                .segs
-                .iter()
-                .filter(|s| !matches!(s, Seg::PageBreak))
-                .cloned()
-                .collect();
+            let segs: Vec<Seg> = p.segs.iter().filter(|s| !s.is_break()).cloned().collect();
             let text = self.inline_json(&segs, &elem_style);
             let mut cur = &mut root;
             for depth in 0..l {
@@ -3196,6 +3208,9 @@ fn page_json(s: &Sect) -> Map<String, Value> {
     if let Some((c, g)) = s.cols {
         m.insert("columns".into(), json!({ "count": c, "gap": round2(g) }));
     }
+    if s.pg_fmt != PageNumberFormat::Decimal {
+        m.insert("pageNumberFormat".into(), json!(s.pg_fmt.word()));
+    }
     m
 }
 
@@ -3227,6 +3242,12 @@ fn page_full(s: &Sect) -> Map<String, Value> {
     m.insert(
         "columns".into(),
         p.get("columns").cloned().unwrap_or(json!({ "count": 1 })),
+    );
+    m.insert(
+        "pageNumberFormat".into(),
+        p.get("pageNumberFormat")
+            .cloned()
+            .unwrap_or(json!("decimal")),
     );
     m
 }

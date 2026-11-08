@@ -94,6 +94,9 @@ pub struct Page {
     /// 页码从几开始
     #[serde(default)]
     pub page_number_start: Option<u32>,
+    /// 页码的数字格式，默认 decimal（1, 2, 3）
+    #[serde(default)]
+    pub page_number_format: Option<PageNumberFormat>,
 }
 
 /// 页眉或页脚：一个元素 id 表示每页都用它（只改 default），
@@ -230,6 +233,129 @@ pub enum PageSize {
     Custom { width: Len, height: Len },
 }
 
+/// 页码的数字格式，名字和 Word 的 w:pgNumType w:fmt 一样。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum PageNumberFormat {
+    /// 1, 2, 3
+    #[default]
+    Decimal,
+    /// i, ii, iii
+    LowerRoman,
+    /// I, II, III
+    UpperRoman,
+    /// a, b, c
+    LowerLetter,
+    /// A, B, C
+    UpperLetter,
+    /// 一, 二, 三
+    ChineseCounting,
+}
+
+impl PageNumberFormat {
+    pub const ALL: [PageNumberFormat; 6] = [
+        PageNumberFormat::Decimal,
+        PageNumberFormat::LowerRoman,
+        PageNumberFormat::UpperRoman,
+        PageNumberFormat::LowerLetter,
+        PageNumberFormat::UpperLetter,
+        PageNumberFormat::ChineseCounting,
+    ];
+
+    /// Word 里的写法，也是 JSON 里的写法。
+    pub fn word(self) -> &'static str {
+        match self {
+            PageNumberFormat::Decimal => "decimal",
+            PageNumberFormat::LowerRoman => "lowerRoman",
+            PageNumberFormat::UpperRoman => "upperRoman",
+            PageNumberFormat::LowerLetter => "lowerLetter",
+            PageNumberFormat::UpperLetter => "upperLetter",
+            PageNumberFormat::ChineseCounting => "chineseCounting",
+        }
+    }
+
+    pub fn from_word(s: &str) -> Option<PageNumberFormat> {
+        Self::ALL.into_iter().find(|f| f.word() == s)
+    }
+
+    /// 按这个格式写出数字 n。0 和负数没有罗马数字、字母写法，照阿拉伯数字写。
+    /// 字母按 Word 的规则：过了 z 重复字母（aa, bb, …），不是 Excel 的 aa, ab。
+    pub fn format(self, n: i64) -> String {
+        if n <= 0 {
+            return n.to_string();
+        }
+        match self {
+            PageNumberFormat::Decimal => n.to_string(),
+            PageNumberFormat::LowerRoman => roman(n).to_lowercase(),
+            PageNumberFormat::UpperRoman => roman(n),
+            PageNumberFormat::LowerLetter => letter(n, b'a'),
+            PageNumberFormat::UpperLetter => letter(n, b'A'),
+            PageNumberFormat::ChineseCounting => chinese(n),
+        }
+    }
+}
+
+fn roman(mut n: i64) -> String {
+    const T: [(i64, &str); 13] = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut out = String::new();
+    for (v, s) in T {
+        while n >= v {
+            out.push_str(s);
+            n -= v;
+        }
+    }
+    out
+}
+
+fn letter(n: i64, base: u8) -> String {
+    let c = (base + ((n - 1) % 26) as u8) as char;
+    c.to_string().repeat(((n - 1) / 26 + 1) as usize)
+}
+
+/// Word 的 chineseCounting：一、十、十一、二十、一百零一……
+fn chinese(n: i64) -> String {
+    const D: [&str; 10] = ["〇", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+    const U: [&str; 4] = ["", "十", "百", "千"];
+    if n >= 10000 {
+        return n.to_string();
+    }
+    let digits: Vec<usize> = n.to_string().bytes().map(|b| (b - b'0') as usize).collect();
+    let len = digits.len();
+    let mut out = String::new();
+    let mut zero = false;
+    for (i, &d) in digits.iter().enumerate() {
+        let unit = len - 1 - i;
+        if d == 0 {
+            zero = true;
+            continue;
+        }
+        if zero && !out.is_empty() {
+            out.push_str(D[0]);
+        }
+        zero = false;
+        // 10 到 19 写「十」「十一」，不写「一十」
+        if !(d == 1 && unit == 1 && i == 0) {
+            out.push_str(D[d]);
+        }
+        out.push_str(U[unit]);
+    }
+    out
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Columns {
@@ -278,6 +404,7 @@ impl Default for Page {
             header_distance: None,
             footer_distance: None,
             page_number_start: None,
+            page_number_format: None,
         }
     }
 }
@@ -332,7 +459,8 @@ impl Page {
             gutter,
             columns,
             header_distance,
-            footer_distance
+            footer_distance,
+            page_number_format
         );
     }
 
@@ -668,10 +796,13 @@ impl Doc {
     }
 }
 
-/// 页眉页脚里不能分页、分节。
+/// 页眉页脚里不能分页、分栏、分节。
 fn check_hf(n: &Node) -> Result<()> {
     match n.component {
-        Component::PageBreak(_) | Component::Section(_) | Component::Slide(_) => {
+        Component::PageBreak(_)
+        | Component::ColumnBreak(_)
+        | Component::Section(_)
+        | Component::Slide(_) => {
             bail!("元素 `{}`：页眉页脚里不能放 {}", n.id, n.component.name())
         }
         _ => {}

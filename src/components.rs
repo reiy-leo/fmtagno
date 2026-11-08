@@ -524,6 +524,11 @@ pub struct ImageProps {
 #[serde(deny_unknown_fields)]
 pub struct PageBreakProps {}
 
+/// 分栏符：在分栏的节里，后面的内容从下一栏开始。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ColumnBreakProps {}
+
 /// 分割线：一条横线，外观由样式的 borderBottom 决定。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -615,6 +620,9 @@ pub struct SectionProps {
     /// 本节页码从几重新开始
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_number_start: Option<u32>,
+    /// 页码的数字格式：decimal、lowerRoman、upperRoman、lowerLetter、upperLetter、chineseCounting
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_number_format: Option<crate::doc::PageNumberFormat>,
     /// 算好的版面，建树时填
     #[serde(skip)]
     #[schemars(skip)]
@@ -639,6 +647,7 @@ pub enum Component {
     Table(TableProps),
     Image(ImageProps),
     PageBreak(PageBreakProps),
+    ColumnBreak(ColumnBreakProps),
     Divider(DividerProps),
     Quote(QuoteProps),
     Callout(CalloutProps),
@@ -659,6 +668,7 @@ impl Component {
             Component::Table(_) => "Table",
             Component::Image(_) => "Image",
             Component::PageBreak(_) => "PageBreak",
+            Component::ColumnBreak(_) => "ColumnBreak",
             Component::Divider(_) => "Divider",
             Component::Quote(_) => "Quote",
             Component::Callout(_) => "Callout",
@@ -798,6 +808,13 @@ pub const BUILTINS: &[Spec] = &[
         schema: || schema_for!(PageBreakProps),
     },
     Spec {
+        name: "ColumnBreak",
+        description: "分栏符：分栏的节里跳到下一栏；不分栏时 docx、pdf 当分页，html 忽略",
+        container: false,
+        parts: &[],
+        schema: || schema_for!(ColumnBreakProps),
+    },
+    Spec {
         name: "Divider",
         description: "分割线，外观由 borderBottom 决定",
         container: false,
@@ -827,7 +844,7 @@ pub const BUILTINS: &[Spec] = &[
     },
     Spec {
         name: "Section",
-        description: "一节，只能直接放在 root 下面：可以换纸张、方向、页边距、分栏、页眉页脚，页码可以重新开始；没写的沿用上一节",
+        description: "一节，只能直接放在 root 下面：可以换纸张、方向、页边距、分栏、页眉页脚，页码可以重新开始、换数字格式；没写的沿用上一节",
         container: true,
         parts: &[],
         schema: || schema_for!(SectionProps),
@@ -870,6 +887,7 @@ pub fn parse(kind: &str, props: &serde_json::Value) -> anyhow::Result<Component>
         "Table" => Component::Table(serde_json::from_value(p)?),
         "Image" => Component::Image(serde_json::from_value(p)?),
         "PageBreak" => Component::PageBreak(serde_json::from_value(p)?),
+        "ColumnBreak" => Component::ColumnBreak(serde_json::from_value(p)?),
         "Divider" => Component::Divider(serde_json::from_value(p)?),
         "Quote" => Component::Quote(serde_json::from_value(p)?),
         "Callout" => Component::Callout(serde_json::from_value(p)?),

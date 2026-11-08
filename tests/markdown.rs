@@ -35,13 +35,14 @@ fn lists_tables_code() {
     let json = r##"{
       "root": "d",
       "elements": {
-        "d": { "type": "Document", "children": ["l", "t", "m", "c", "pb", "p"] },
+        "d": { "type": "Document", "children": ["l", "t", "m", "c", "pb", "cb", "p"] },
         "l": { "type": "List", "props": { "ordered": true, "items": [
           "一", { "text": "二", "items": ["二.1", "二.2"], "ordered": false }, "三" ] } },
         "t": { "type": "Table", "props": { "columns": ["名称", "数量"], "rows": [["a|b", "1"], ["c", "2"]] } },
         "m": { "type": "Table", "props": { "rows": [[{ "text": "合并", "colSpan": 2 }], ["x", "y"]] } },
         "c": { "type": "Code", "props": { "language": "rust", "code": "let a = `b`;\n" } },
         "pb": { "type": "PageBreak" },
+        "cb": { "type": "ColumnBreak" },
         "p": { "type": "Text", "props": { "text": ["第一行\n第二行 ", { "text": "链接", "href": "https://example.com", "italic": true }] } }
       }
     }"##;
@@ -61,4 +62,5 @@ fn lists_tables_code() {
         "{s}"
     );
     assert!(w.iter().any(|x| x.contains("PageBreak")), "{w:?}");
+    assert!(w.iter().any(|x| x.contains("ColumnBreak")), "{w:?}");
 }

@@ -12,7 +12,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。
 ## 第一版（v0.1）
 
 - 格式：docx、pdf、html，外加 Markdown（GFM，只留结构不留样式，有合并格的表格写成内嵌 HTML，提示框写成 `> [!NOTE]`）。
-- 内置组件：Heading、Text、Code、Math（块级公式）、List、Table、Image、PageBreak、Divider（分割线）、Quote（引用）、Callout（提示框）、TableOfContents（目录）、Slide、Section（分节），外加根组件 Document；行内有 InlineCode 和 InlineMath（行内公式），都写在 runs 里。
+- 内置组件：Heading、Text、Code、Math（块级公式）、List、Table、Image、PageBreak、ColumnBreak（分栏符）、Divider（分割线）、Quote（引用）、Callout（提示框）、TableOfContents（目录）、Slide、Section（分节），外加根组件 Document；行内有 InlineCode 和 InlineMath（行内公式），都写在 runs 里。
 - 命令行：
   - `fmtagno render doc.json -o out.docx`：按输出文件的扩展名选格式。
   - `fmtagno check doc.json`：只校验，不出文件。
@@ -61,11 +61,11 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。
 
 文字类的 props（Heading 的 `text`、Text 的 `text`、List 的每一项、表格的每一格）都能写成纯字符串，也能写成 runs 数组。数组里可以直接写字符串，也可以写对象：`bold`、`italic`、`underline`、`color`、`href` 是简写，`style` 能写全部文字样式；`"type": "InlineCode"` 表示行内代码，`"type": "InlineMath"` 表示行内公式（text 写 LaTeX）。块级公式用 Math 组件，写法见 [STYLE.md](STYLE.md) 第十四节。列表项可以写成 `{ "text": …, "items": [...] }` 带子列表。
 
-`meta.page` 管纸张：`size`（默认 A4，也可以写 `{ "width", "height" }`）、`landscape`、`margin` 和四个单边、`gutter`、`columns`，还有页眉页脚 `header`、`footer` 和页码起始 `pageNumberStart`。要分节就在 root 下面放 `Section`，每节能单独改这些设置；runs 里写 `{ "field": "page" }` 显示页码。细节见 [STYLE.md](STYLE.md) 第十节。
+`meta.page` 管纸张：`size`（默认 A4，也可以写 `{ "width", "height" }`）、`landscape`、`margin` 和四个单边、`gutter`、`columns`，还有页眉页脚 `header`、`footer`，页码起始 `pageNumberStart` 和页码格式 `pageNumberFormat`（罗马数字、字母、中文数字）。要分节就在 root 下面放 `Section`，每节能单独改这些设置；runs 里写 `{ "field": "page" }` 显示页码。细节见 [STYLE.md](STYLE.md) 第十节。
 
 样式字段、样式集（`styleSet`、`styleSets`）、部位样式和层叠顺序都在 [STYLE.md](STYLE.md)。字段名跟 CSS 走，取值以 OOXML 为准；某个格式表达不了的样式，渲染时忽略并给一次警告，不报错。
 
-完整例子见 `examples/showcase.json`、`examples/styles.json`，分节和页眉页脚见 `examples/sections.json`。
+完整例子见 `examples/showcase.json`、`examples/styles.json`，分节和页眉页脚见 `examples/sections.json`，页码格式和分栏符见 `examples/frontmatter.json`。
 
 ## 各格式的差别
 
@@ -118,10 +118,10 @@ fmtagno parse report.docx -o out/report.json --assets img   # 图片导到 out/i
 - 正文和行内样式：字体、字号、颜色、粗体、斜体、下划线、删除线、上下标、大小写、字间距、缩放、高亮、底纹、着重号、隐藏；链接（超链接和 HYPERLINK 域）；行内代码（字符样式叫 InlineCode 的）。
 - 段落格式：对齐、段前段后、行距、缩进（按字符计的写成 em）、与下段同页、段中不分页、段前分页、孤行控制、边框和底纹。
 - 列表：numbering.xml 里的编号变成 List，有序无序、嵌套、每一级的编号类型、编号模板、起始编号、缩进、编号颜色和字号。
-- 表格：合并格（gridSpan、vMerge）、列宽、行高、每格的底纹、边框、对齐、竖排、边距；第一行设了「标题行重复」并且每格都有底纹时变成表头 columns。
-- 图片：行内图片和单独一段的图片（Image），图片文件导到 JSON 旁边的目录，JSON 里写相对路径；浮动图片按位置写成 float 或 absolute。
-- 分节：纸张大小和方向、页边距、页眉页脚距离、分栏、首页不同、奇偶页不同、页码起始值。第一节写在 `meta.page`，后面每节一个 Section。
-- 页眉页脚、页码（PAGE、NUMPAGES、SECTIONPAGES 域）、分页符、目录（TOC 域变回 TableOfContents）。
+- 表格：合并格（gridSpan、vMerge）、列宽、行高、每格的底纹、边框、对齐、竖排、边距；表头按 Word 的「重复标题行」（w:tblHeader）认：第一行设了它就变成表头 columns，原来没底纹的写成 `parts.header` 的 `"background": "none"`，有底纹的照写；没设的第一行当普通行。好几行都设了时只有第一行当表头，给警告。
+- 图片：行内图片和单独一段的图片（Image），图片文件导到 JSON 旁边的目录，JSON 里写相对路径；浮动图片按位置写成 float 或 absolute。替代文字从 wp:docPr 的 descr 读，没有 descr 时用 title；Image 写成 `alt`，行内图片写成 `text`。
+- 分节：纸张大小和方向、页边距、页眉页脚距离、分栏、首页不同、奇偶页不同、页码起始值、页码格式（decimal、罗马数字、字母、chineseCounting；别的格式给警告，按阿拉伯数字处理）。第一节写在 `meta.page`，后面每节一个 Section。
+- 页眉页脚、页码（PAGE、NUMPAGES、SECTIONPAGES 域）、分页符、分栏符（变回 ColumnBreak）、目录（TOC 域变回 TableOfContents）。
 - 边框：Word 的 25 种线型都换回 STYLE.md 里的名字，`single` 写成 `solid`。
 - 公式：OMML 转成 LaTeX，单独一段的变成 Math（带编号的也认），夹在文字里的变成 InlineMath。认不出的结构给警告，只留文字。
 
@@ -136,10 +136,10 @@ fmtagno parse report.docx -o out/report.json --assets img   # 图片导到 out/i
 
 - 文本框、形状、艺术字、图表、SmartArt；嵌入对象（比如 MathType 公式）只留预览图。
 - 脚注、尾注、批注、修订（已删除的文字不要，插入的文字照常保留）。
-- 制表位（制表符原样留在文字里）、分栏符、页面垂直对齐、页码格式（罗马数字这些）、连续分节。
+- 制表位（制表符原样留在文字里）、页面垂直对齐、连续分节；页码格式只认上面那六种。
 - 表格样式里的条件格式（首行、隔行这些），表格整体居中，格子斜线，表格里套的表格（文字接在格子里）。
 - Word 的「多倍行距」按 fmtagno 的倍数（字号 × 倍数）理解，渲染回去行距会比原文档紧一点。
-- 渲染器本来就表达不了的东西读回来也一样：比如同一级列表在 Word 里只有一种编号定义，图片的替代文字 docx 渲染时没写。
+- 渲染器本来就表达不了的东西读回来也一样：比如同一级列表在 Word 里只有一种编号定义。
 
 ## 自定义组件
 

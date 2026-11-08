@@ -23,7 +23,7 @@ use crate::{
         CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableOfContentsProps,
         TableProps,
     },
-    doc::{Doc, HfNodes, Node, SectionLayout},
+    doc::{Doc, HfNodes, Node, PageNumberFormat, SectionLayout},
     render::{
         Options, Output,
         common::{self, Grid, Warn},
@@ -137,21 +137,28 @@ pub type Files = Vec<(String, Vec<u8>)>;
 
 /// 生成 Typst 源码。返回源码、图片文件、警告。
 /// 页码函数，见 preamble。
-const FIELDS_FN: &str = r#"#let fmtagno-info() = {
-  let p = here().page()
+const FIELDS_FN: &str = r#"#let fmtagno-num(n, fmt) = if n < 1 or fmt == "1" { str(n) } else if fmt == "a" or fmt == "A" {
+  str.from-unicode((if fmt == "a" { 97 } else { 65 }) + calc.rem(n - 1, 26)) * (calc.quo(n - 1, 26) + 1)
+} else { numbering(fmt, n) }
+#let fmtagno-info(loc: none) = {
+  let p = if loc == none { here().page() } else { loc.page() }
   let num = 1
+  let fmt = "1"
   let prev = none
   let next = none
   for m in query(<fmtagno-sec>) {
     let sp = m.location().page()
     if sp > p { next = sp; break }
-    if m.value != none { num = m.value } else if prev != none { num = num + sp - prev }
+    let v = m.value
+    if v.start != none { num = v.start } else if prev != none { num = num + sp - prev }
+    fmt = v.fmt
     prev = sp
   }
   if prev == none { prev = 1 }
   let end = locate(<fmtagno-end>).page()
   (
     page: num + p - prev,
+    page-text: fmtagno-num(num + p - prev, fmt),
     first: prev == p,
     total: end,
     section-pages: (if next == none { end + 1 } else { next }) - prev,
@@ -207,7 +214,7 @@ struct Markup<'a> {
 impl Markup<'_> {
     fn preamble(&mut self, doc: &Doc) {
         let o = &mut self.out;
-        // 页码这类域都靠它算：每节开头放一个 <fmtagno-sec> 标记（值是重新开始的页码或 none），
+        // 页码这类域都靠它算：每节开头放一个 <fmtagno-sec> 标记（值是重新开始的页码或 none，和页码格式），
         // 文末放 <fmtagno-end>。页码自己数，不用 counter(page)，这样首页判断、重排页码和
         // Word 的规则一致。
         o.push_str(FIELDS_FN);
@@ -353,6 +360,8 @@ impl Markup<'_> {
                 self.out.push_str("#pagebreak()\n");
                 self.out.push_str(TOP_ANCHOR);
             }
+            // 不分栏时 typst 的 colbreak 等于分页，跟 Word 一样
+            Component::ColumnBreak(_) => self.out.push_str("#colbreak()\n"),
             Component::Section(p) => self.section(n, p.layout(), parent),
         }
     }
@@ -393,7 +402,12 @@ impl Markup<'_> {
         let start = lay
             .page_number_start
             .map_or("none".to_string(), |x| x.to_string());
-        let _ = writeln!(o, "#metadata({start}) <fmtagno-sec>");
+        let fmt = typst_numbering(page.page_number_format.unwrap_or_default());
+        let _ = writeln!(
+            o,
+            "#metadata((start: {start}, fmt: {})) <fmtagno-sec>",
+            lit(fmt)
+        );
         o.push_str(TOP_ANCHOR);
         self.out.push_str(&o);
         let body = self.children_src(n);
@@ -572,7 +586,7 @@ impl Markup<'_> {
             body = format!("#rotate({deg}deg, reflow: true)[{body}]");
         }
         let mut args = Vec::new();
-        if let Some(bg) = &s.background {
+        if let Some(bg) = s.bg() {
             args.push(format!("fill: {}", bg_src(bg)));
         }
         let strokes = strokes(s);
@@ -729,6 +743,10 @@ impl Markup<'_> {
                 return String::new();
             };
             let mut args = vec![lit(&path)];
+            // 行内图片的 text 是替代文字
+            if !r.text.is_empty() {
+                args.push(format!("alt: {}", lit(&r.text)));
+            }
             if let Some(w) = r.width {
                 args.push(format!("width: {w}pt"));
             }
@@ -739,7 +757,8 @@ impl Markup<'_> {
         }
         if let Some(f) = r.field {
             let key = match f {
-                Field::Page => "page",
+                // 跟 Word 一样，只有 PAGE 按节的页码格式显示，总页数和本节页数都是阿拉伯数字
+                Field::Page => "page-text",
                 Field::Pages => "total",
                 Field::SectionPages => "section-pages",
             };
@@ -807,7 +826,7 @@ impl Markup<'_> {
         if let Some(h) = &s.highlight {
             piece = format!("#highlight(fill: {})[{piece}]", color(h));
         }
-        if let Some(bg) = &s.background {
+        if let Some(bg) = s.bg() {
             piece = format!(
                 "#box(fill: {}, inset: (x: 2pt), outset: (y: 2pt), radius: 2pt)[#set text(top-edge: \"ascender\", bottom-edge: \"descender\");{piece}]",
                 bg_src(bg)
@@ -841,7 +860,7 @@ impl Markup<'_> {
         es.space_before = None;
         es.space_after = None;
         let ol = format!(
-            "#show outline.entry: it => block(above: {above}pt, below: {below}pt, inset: (left: {base}pt + (it.level - 1) * {step}pt), link(it.element.location(), [#it.body()#box(width: 1fr, repeat(gap: 0.15em)[.])#it.page()]))\n#outline(title: none, depth: {}, indent: 0pt)",
+            "#show outline.entry: it => block(above: {above}pt, below: {below}pt, inset: (left: {base}pt + (it.level - 1) * {step}pt), link(it.element.location(), [#it.body()#box(width: 1fr, repeat(gap: 0.15em)[.])#context fmtagno-info(loc: it.element.location()).page-text]))\n#outline(title: none, depth: {}, indent: 0pt)",
             p.depth()
         );
         let src = self.block_src(ol, &es, s, &n.id);
@@ -999,7 +1018,7 @@ impl Markup<'_> {
                     let _ = writeln!(sets, "#set align({a})");
                 }
                 let mut args = Vec::new();
-                if let Some(bg) = &part.background {
+                if let Some(bg) = part.bg() {
                     args.push(format!("fill: {}", bg_src(bg)));
                 }
                 let b = common::span_edges(n, &p.look, &g, r, c);
@@ -1451,6 +1470,18 @@ fn lang_code(l: &str) -> String {
 }
 
 /// Typst 字符串字面量。
+/// 页码格式对应的 typst 编号写法；字母由 FIELDS_FN 里的 fmtagno-num 按 Word 的规则自己写。
+fn typst_numbering(f: PageNumberFormat) -> &'static str {
+    match f {
+        PageNumberFormat::Decimal => "1",
+        PageNumberFormat::LowerRoman => "i",
+        PageNumberFormat::UpperRoman => "I",
+        PageNumberFormat::LowerLetter => "a",
+        PageNumberFormat::UpperLetter => "A",
+        PageNumberFormat::ChineseCounting => "一",
+    }
+}
+
 fn lit(s: &str) -> String {
     let mut o = String::with_capacity(s.len() + 2);
     o.push('"');

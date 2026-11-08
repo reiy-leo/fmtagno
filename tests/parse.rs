@@ -61,6 +61,7 @@ fn kinds(n: &Node, out: &mut Vec<String>) {
         }
         Component::Math(_) => push(out, "M"),
         Component::PageBreak(_) => push(out, "PB"),
+        Component::ColumnBreak(_) => push(out, "CB"),
         Component::TableOfContents(p) => {
             if p.title.is_some() {
                 push(out, "T");
@@ -124,6 +125,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("sections", include_str!("../examples/sections.json")),
     ("pages", include_str!("../examples/pages.json")),
     ("custom", include_str!("../examples/custom.json")),
+    ("frontmatter", include_str!("../examples/frontmatter.json")),
 ];
 
 #[test]
@@ -328,13 +330,22 @@ fn images_are_exported_next_to_json() {
       "root": "d",
       "elements": {
         "d": { "type": "Document", "children": ["i", "p"] },
-        "i": { "type": "Image", "props": { "src": "dot.png", "width": 80, "alt": "点" }, "style": { "horizontalAlign": "center" } },
-        "p": { "type": "Text", "props": { "text": ["前", { "image": "dot.png", "width": 16, "height": 8 }, "后"] } }
+        "i": { "type": "Image", "props": { "src": "dot.png", "width": 80, "alt": "点 \"蓝\" & <小>" }, "style": { "horizontalAlign": "center" } },
+        "p": { "type": "Text", "props": { "text": ["前", { "image": "dot.png", "text": "行内小点", "width": 16, "height": 8 }, "后"] } }
       }
     }"##;
     let docx = fmtagno::render_str(json, Format::Docx, Some(&dir))
         .unwrap()
         .bytes;
+    // 替代文字写进 wp:docPr 的 descr，每张图的 id 不重复
+    let xml = String::from_utf8_lossy(&docx);
+    assert!(
+        xml.contains(
+            r#"<wp:docPr id="1" name="Picture 1" descr="点 &quot;蓝&quot; &amp; &lt;小&gt;" />"#
+        ),
+        "块级图片的替代文字"
+    );
+    assert!(xml.contains(r#"<wp:docPr id="2" name="Picture 2" descr="行内小点" />"#));
     let parsed = parse(&docx);
     assert!(!parsed.assets.is_empty());
     let img = &parsed.json["elements"]["image1"];
@@ -346,12 +357,14 @@ fn images_are_exported_next_to_json() {
             .starts_with("x.assets/")
     );
     assert_eq!(img["props"]["width"], 80);
+    assert_eq!(img["props"]["alt"], "点 \"蓝\" & <小>");
     assert_eq!(img["style"]["horizontalAlign"], "center");
     let runs = parsed.json["elements"]["p1"]["props"]["text"]
         .as_array()
         .unwrap();
     assert_eq!(runs.len(), 3);
     assert_eq!(runs[1]["width"], 16);
+    assert_eq!(runs[1]["text"], "行内小点");
 }
 
 #[test]
@@ -364,4 +377,200 @@ fn not_a_docx_is_an_error() {
     )
     .unwrap_err();
     assert!(format!("{e:#}").contains("zip"));
+}
+
+#[test]
+fn page_number_formats_and_column_breaks_come_back() {
+    let json = include_str!("../examples/frontmatter.json");
+    let parsed = parse(&to_docx(json));
+    let w = parsed.warnings.join("\n");
+    assert!(!w.contains("页码格式"), "{w}");
+    assert!(!w.contains("分栏符"), "{w}");
+    let page = &parsed.json["meta"]["page"];
+    assert_eq!(page["pageNumberFormat"], "lowerRoman");
+    assert_eq!(page["pageNumberStart"], 1);
+    // 后面的节只写和上一节不同的；正文换回 decimal 要写出来
+    let els = &parsed.json["elements"];
+    let secs: Vec<&Value> = parsed.json["elements"]["doc"]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|id| els.get(id.as_str()?))
+        .filter(|e| e["type"] == "Section")
+        .collect();
+    let fmts: Vec<&Value> = secs
+        .iter()
+        .map(|s| &s["props"]["pageNumberFormat"])
+        .collect();
+    assert_eq!(fmts, ["decimal", "upperLetter", "chineseCounting"]);
+    let cbs = els
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|e| e["type"] == "ColumnBreak")
+        .count();
+    assert_eq!(cbs, 1);
+    // 再渲染回 docx，页码格式还在
+    let text = serde_json::to_string(&parsed.json).unwrap();
+    let again = fmtagno::render_str(&text, Format::Docx, None).unwrap();
+    let x = String::from_utf8_lossy(&again.bytes);
+    assert!(x.contains(r#"w:fmt="lowerRoman""#));
+    assert!(x.contains(r#"w:fmt="chineseCounting""#));
+    assert!(x.contains(r#"<w:br w:type="column" />"#));
+}
+
+/// 改 docx 里的 word/document.xml。
+fn edit_document(docx: &[u8], f: impl Fn(String) -> String) -> Vec<u8> {
+    use std::io::{Read, Write};
+    let mut zin = zip::ZipArchive::new(std::io::Cursor::new(docx)).unwrap();
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for i in 0..zin.len() {
+        let mut e = zin.by_index(i).unwrap();
+        let name = e.name().to_string();
+        let mut buf = Vec::new();
+        e.read_to_end(&mut buf).unwrap();
+        if name == "word/document.xml" {
+            buf = f(String::from_utf8(buf).unwrap()).into_bytes();
+        }
+        out.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        out.write_all(&buf).unwrap();
+    }
+    out.finish().unwrap().into_inner()
+}
+
+#[test]
+fn unknown_page_number_format_warns() {
+    let json = r#"{"meta":{"page":{"pageNumberFormat":"upperRoman"}},"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Text","props":{"text":"a"}}}}"#;
+    let docx = edit_document(&to_docx(json), |x| {
+        x.replace(r#"w:fmt="upperRoman""#, r#"w:fmt="ordinal""#)
+    });
+    let parsed = parse(&docx);
+    assert!(
+        parsed
+            .warnings
+            .iter()
+            .any(|w| w.contains("不认识的页码格式 `ordinal`")),
+        "{:?}",
+        parsed.warnings
+    );
+    assert!(
+        parsed.json["meta"]["page"]
+            .get("pageNumberFormat")
+            .is_none()
+    );
+}
+
+#[test]
+fn image_alt_falls_back_to_title() {
+    let dir = std::env::temp_dir().join("fmtagno-parse-title");
+    std::fs::create_dir_all(&dir).unwrap();
+    let tmp =
+        dir.join(format!("dot-{:?}.png", std::thread::current().id()).replace(['(', ')'], ""));
+    image::RgbImage::from_pixel(4, 4, image::Rgb([200, 20, 20]))
+        .save(&tmp)
+        .unwrap();
+    std::fs::rename(&tmp, dir.join("dot.png")).unwrap();
+    let json = r#"{"root":"d","elements":{"d":{"type":"Document","children":["i"]},"i":{"type":"Image","props":{"src":"dot.png","width":20}}}}"#;
+    let docx = fmtagno::render_str(json, Format::Docx, Some(&dir))
+        .unwrap()
+        .bytes;
+    // 没写 descr、只有 title 的图（别的软件这么存）
+    let docx = edit_document(&docx, |x| {
+        x.replace(
+            r#"<wp:docPr id="1" name="Picture 1" />"#,
+            r#"<wp:docPr id="1" name="Picture 1" title="红点" />"#,
+        )
+    });
+    let parsed = parse(&docx);
+    assert_eq!(parsed.json["elements"]["image1"]["props"]["alt"], "红点");
+}
+
+const WHITE_HEADER: &str = r##"{
+  "root": "d",
+  "elements": {
+    "d": { "type": "Document", "children": ["t"] },
+    "t": {
+      "type": "Table",
+      "props": { "columns": ["名称", { "text": "数量", "style": { "background": "#DDEEFF" } }], "rows": [["a", "1"], ["b", "2"]] },
+      "parts": { "header": { "background": "none" } }
+    }
+  }
+}"##;
+
+#[test]
+fn white_table_header_stays_white() {
+    // 渲染：三种格式都不画内置的灰底，单格自己的底纹照画
+    let x = String::from_utf8_lossy(&to_docx(WHITE_HEADER)).into_owned();
+    assert!(!x.contains("F3F3F3"), "docx 不该有灰底");
+    assert!(x.contains("DDEEFF"));
+    assert!(x.contains("<w:tblHeader"), "表头跨页重复");
+    let h = fmtagno::render_str(WHITE_HEADER, Format::Html, None).unwrap();
+    let h = String::from_utf8(h.bytes).unwrap();
+    assert!(!h.to_uppercase().contains("F3F3F3"), "html 不该有灰底");
+    assert!(h.to_uppercase().contains("DDEEFF"));
+    let (d, tree) = fmtagno::prepare(WHITE_HEADER, &fmtagno::Env::default()).unwrap();
+    let (src, _, _) = fmtagno::render::pdf::markup(&d, &tree, &Default::default());
+    assert!(!src.to_uppercase().contains("F3F3F3"), "pdf 不该有灰底");
+    assert!(src.to_uppercase().contains("DDEEFF"));
+    // 往返：还是 columns，parts.header 写 background none，再渲染也不变灰
+    let parsed = parse(&to_docx(WHITE_HEADER));
+    let t = &parsed.json["elements"]["table1"];
+    assert_eq!(t["props"]["columns"].as_array().unwrap().len(), 2, "{t}");
+    assert_eq!(t["parts"]["header"]["background"], "none", "{t}");
+    assert_eq!(t["props"]["columns"][1]["style"]["background"], "#DDEEFF");
+    let text = serde_json::to_string(&parsed.json).unwrap();
+    let again = fmtagno::render_str(&text, Format::Docx, None).unwrap();
+    let again = String::from_utf8_lossy(&again.bytes);
+    assert!(!again.contains("F3F3F3"));
+    assert!(again.contains("<w:tblHeader"));
+}
+
+#[test]
+fn header_is_decided_by_repeat_header_rows() {
+    // 默认灰底表头往返：还是 columns，不写 background
+    let grey = r#"{"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Table","props":{"columns":["甲","乙"],"rows":[["1","2"]]}}}}"#;
+    let parsed = parse(&to_docx(grey));
+    let t = &parsed.json["elements"]["table1"];
+    assert!(t["props"]["columns"].is_array(), "{t}");
+    assert!(
+        t.get("parts").and_then(|p| p.get("header")).is_none(),
+        "{t}"
+    );
+    // 不重复表头：第一行虽然有灰底，也当普通行
+    let no_repeat = r#"{"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Table","props":{"columns":["甲","乙"],"rows":[["1","2"]]},"style":{"repeatHeader":false}}}}"#;
+    let x = String::from_utf8_lossy(&to_docx(no_repeat)).into_owned();
+    assert!(!x.contains("<w:tblHeader"));
+    let parsed = parse(&to_docx(no_repeat));
+    let t = &parsed.json["elements"]["table1"];
+    assert!(t["props"].get("columns").is_none(), "{t}");
+    assert_eq!(t["props"]["rows"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn multi_row_repeat_header_keeps_first_row() {
+    let json = r#"{"root":"d","elements":{"d":{"type":"Document","children":["t"]},"t":{"type":"Table","props":{"columns":["甲","乙"],"rows":[["1","2"],["3","4"]]}}}}"#;
+    // 第二行也标成重复标题行
+    let docx = edit_document(&to_docx(json), |x| {
+        let first = x.find("<w:tblHeader").unwrap();
+        let end = first + x[first..].find("</w:tr>").unwrap();
+        let pr = end + x[end..].find("<w:trPr").unwrap();
+        let (head, tail) = x.split_at(pr);
+        let tail = if let Some(t) = tail.strip_prefix("<w:trPr />") {
+            format!("<w:trPr><w:tblHeader /></w:trPr>{t}")
+        } else {
+            tail.replacen("<w:trPr>", "<w:trPr><w:tblHeader />", 1)
+        };
+        format!("{head}{tail}")
+    });
+    let parsed = parse(&docx);
+    assert!(
+        parsed.warnings.iter().any(|w| w.contains("表头有好几行")),
+        "{:?}",
+        parsed.warnings
+    );
+    let t = &parsed.json["elements"]["table1"];
+    let c0 = &t["props"]["columns"][0];
+    assert_eq!(c0.as_str().or(c0["text"].as_str()), Some("甲"), "{t}");
+    assert_eq!(t["props"]["rows"].as_array().unwrap().len(), 2);
 }

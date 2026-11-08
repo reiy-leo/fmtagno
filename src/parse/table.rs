@@ -463,7 +463,7 @@ impl Ctx {
                     }
                     for s in &p.segs {
                         match s {
-                            Seg::PageBreak => {}
+                            Seg::PageBreak | Seg::ColumnBreak => {}
                             Seg::Math {
                                 latex, style, jc, ..
                             } => segs.push(Seg::Math {
@@ -527,21 +527,28 @@ impl Ctx {
         }
         let cell_base = tcomputed.inherited();
 
-        // 表头：第一行写了 tblHeader，并且每格都有底纹（内置表头底纹去不掉）
-        let header_ok = rows[0].header
+        // 表头按 Word 的「重复标题行」（w:tblHeader）认：第一行写了它就是 columns，
+        // 没写的第一行是普通行，不管有没有底纹
+        let header_ok = rows[0].header;
+        if header_ok && rows.len() > 1 && rows[1].header {
+            self.warns.once(
+                "tblheader-multi",
+                "表头有好几行，只有第一行当表头（columns），后面几行当普通行，跨页时不重复".into(),
+            );
+        }
+        // 表头格子有的没底纹：内置表头的灰底要去掉（parts.header 写 background: none），
+        // 有底纹的格子自己写
+        let header_plain = header_ok
             && blocks
                 .iter()
                 .filter(|b| cells[**b].r == 0)
-                .all(|b| cells[*b].shd.is_some());
-        if rows[0].header && !header_ok {
-            self.warns.once(
-                "tblheader",
-                "表头行有格子没底纹，按普通行处理（fmtagno 的表头自带灰色底纹），跨页重复表头没保留".into(),
-            );
-        }
+                .any(|b| cells[*b].shd.is_none());
         let header_part: Style = if header_ok {
             let mut h = builtin_part("Table.header");
             h.merge(&builtin_part("Table.firstRow"));
+            if header_plain {
+                h.background = Some(crate::style::Background::None);
+            }
             h
         } else {
             Style::default()
@@ -728,8 +735,15 @@ impl Ctx {
         let mut el = json!({ "type": "Table", "props": props });
         compact(&mut tstyle);
         el["style"] = Value::Object(tstyle);
+        let mut parts = Map::new();
         if !cell_part.is_empty() {
-            el["parts"] = json!({ "cell": cell_part });
+            parts.insert("cell".into(), json!(cell_part));
+        }
+        if header_plain {
+            parts.insert("header".into(), json!({ "background": "none" }));
+        }
+        if !parts.is_empty() {
+            el["parts"] = Value::Object(parts);
         }
         self.add(&id, el);
         id

@@ -2,6 +2,7 @@
 //! 标题、代码另外挂上同名的 Word 样式，方便在 Word 里找和改。
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::str::FromStr;
 
 use docx_rs::{
@@ -21,7 +22,7 @@ use crate::{
         CodeProps, Component, Field, ImageProps, ListProps, Run as PRun, TableOfContentsProps,
         TableProps,
     },
-    doc::{Doc, Node, Page, SectionLayout},
+    doc::{Doc, Node, Page, PageNumberFormat, SectionLayout},
     render::{
         Options, Output,
         common::{self, Grid, Warn},
@@ -104,6 +105,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         sections: Vec::new(),
         root: tree.clone(),
         maths: Vec::new(),
+        alts: BTreeMap::new(),
     };
     r.node(tree);
     let sections = std::mem::take(&mut r.sections);
@@ -114,14 +116,19 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         .any(|(l, _)| !l.header.is_empty() || !l.footer.is_empty());
     let even_odd = sections.iter().any(|(l, _)| l.even_odd);
     let last = sections.len().saturating_sub(1);
-    let cols: Vec<Option<(u8, f32)>> = sections
+    let fixes: Vec<SectFix> = sections
         .iter()
-        .map(|(l, _)| {
-            l.page
+        .map(|(l, _)| SectFix {
+            cols: l
+                .page
                 .columns
                 .as_ref()
                 .filter(|c| c.count() > 1)
-                .map(|c| (c.count(), c.gap_pt()))
+                .map(|c| (c.count(), c.gap_pt())),
+            fmt: l
+                .page
+                .page_number_format
+                .filter(|f| *f != PageNumberFormat::Decimal),
         })
         .collect();
     for (i, (lay, blocks)) in sections.into_iter().enumerate() {
@@ -213,8 +220,28 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
     }
     let mut xml = docx.build();
     xml.document = mark_table_headers(&xml.document, &r.repeat_heads);
-    xml.document = fix_sections(&xml.document, &cols);
+    xml.document = fix_sections(&xml.document, &fixes);
     xml.document = mark_behind(&xml.document);
+    // 每张图的 wp:docPr：id 在整份文档里不重复，有替代文字的写进 descr
+    let mut pic_no = 0;
+    // 正文的图先建，页眉页脚的图在各节收尾时才建，所以先正文、后页眉页脚
+    let media: BTreeMap<String, u64> = xml
+        .media
+        .iter()
+        .map(|(name, b)| (stem(name).to_string(), bytes_key(b)))
+        .collect();
+    let doc_rels = rel_targets(std::iter::once(&xml.document_rels));
+    let hf_rels = rel_targets(xml.header_rels.iter().chain(xml.footer_rels.iter()));
+    let key_of = |rels: &BTreeMap<String, String>, rid: &str| -> Option<u64> {
+        let t = rels.get(rid)?;
+        media.get(stem(t)).copied()
+    };
+    xml.document = fix_doc_pr(&xml.document, &mut r.alts, &mut pic_no, &|rid| {
+        key_of(&doc_rels, rid)
+    });
+    for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
+        *h = fix_doc_pr(h, &mut r.alts, &mut pic_no, &|rid| key_of(&hf_rels, rid));
+    }
     xml.document = fix_ind_chars(&xml.document, &r.ind_chars);
     for h in xml.headers.iter_mut().chain(xml.footers.iter_mut()) {
         *h = mark_behind(h);
@@ -438,8 +465,8 @@ fn attr(el: &str, name: &str) -> Option<String> {
 /// 收拾 docx-rs 生成的分节：
 /// 1. 把占位节（纸张 1×1）上的页眉页脚引用挪到它前面那个真正的节上，删掉占位节的段落；
 /// 2. sectPr 里的子元素按 OOXML 规定的顺序排（headerReference 在最前，titlePg 在 cols 后面）；
-/// 3. 按 `cols` 写分栏（docx-rs 的 Section 不让设）。
-fn fix_sections(doc: &[u8], cols: &[Option<(u8, f32)>]) -> Vec<u8> {
+/// 3. 按 `fixes` 写分栏和页码格式（docx-rs 的 Section 不让设）。
+fn fix_sections(doc: &[u8], fixes: &[SectFix]) -> Vec<u8> {
     let Ok(xml) = std::str::from_utf8(doc) else {
         return doc.to_vec();
     };
@@ -513,14 +540,22 @@ fn fix_sections(doc: &[u8], cols: &[Option<(u8, f32)>]) -> Vec<u8> {
         let body = &rest[i + OPEN.len()..j];
         let mut els = elements(body);
         if els.concat().len() == body.len() {
-            if let Some(Some((count, gap))) = cols.get(n) {
+            let fix = fixes.get(n);
+            if let Some((count, gap)) = fix.and_then(|f| f.cols) {
                 let c = format!(
                     "<w:cols w:space=\"{}\" w:num=\"{count}\" />",
-                    units::twip(*gap)
+                    units::twip(gap)
                 );
                 match els.iter_mut().find(|e| e.starts_with("<w:cols ")) {
                     Some(e) => *e = c,
                     None => els.push(c),
+                }
+            }
+            if let Some(fmt) = fix.and_then(|f| f.fmt) {
+                let a = format!(" w:fmt=\"{}\"", fmt.word());
+                match els.iter_mut().find(|e| e.starts_with("<w:pgNumType")) {
+                    Some(e) => e.insert_str("<w:pgNumType".len(), &a),
+                    None => els.push(format!("<w:pgNumType{a} />")),
                 }
             }
             let rank = |e: &String| {
@@ -538,6 +573,14 @@ fn fix_sections(doc: &[u8], cols: &[Option<(u8, f32)>]) -> Vec<u8> {
     }
     done.push_str(rest);
     done.into_bytes()
+}
+
+/// 一节里 docx-rs 写不了、要在生成 XML 后补上的设置。
+struct SectFix {
+    /// 栏数和栏距（pt），只在多于一栏时有
+    cols: Option<(u8, f32)>,
+    /// 页码格式，阿拉伯数字时不写
+    fmt: Option<PageNumberFormat>,
 }
 
 /// sectPr 里自闭合的子元素，按原顺序。
@@ -631,6 +674,94 @@ fn fix_ind_chars(xml: &[u8], list: &[IndChars]) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// 图片内容的指纹，用来把建图时记下的替代文字和 XML 里的图对上。
+fn bytes_key(b: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    b.hash(&mut h);
+    h.finish()
+}
+
+/// 路径里的文件名去掉扩展名：media 里存的名字不带扩展名，rels 的 Target 带。
+fn stem(path: &str) -> &str {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.rsplit_once('.').map_or(name, |(a, _)| a)
+}
+
+/// .rels 里的关系 id → Target。
+fn rel_targets<'a>(rels: impl Iterator<Item = &'a Vec<u8>>) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for r in rels {
+        let r = String::from_utf8_lossy(r);
+        for part in r.split("<Relationship ").skip(1) {
+            let el = &part[..part.find("/>").unwrap_or(part.len())];
+            let el = format!(" {el}");
+            if let (Some(id), Some(t)) = (attr(&el, "Id"), attr(&el, "Target")) {
+                out.insert(id, t);
+            }
+        }
+    }
+    out
+}
+
+/// docx-rs 给每张图都写 `<wp:docPr id="1" name="Figure" />`：Word 要求 id 不重复，
+/// 替代文字也没处写。这里按顺序换成不重复的 id，再按后面紧跟的 r:embed 找到图片内容，
+/// 取出这张图的替代文字写进 descr。
+fn fix_doc_pr(
+    xml: &[u8],
+    alts: &mut Alts,
+    no: &mut u32,
+    key_of: &dyn Fn(&str) -> Option<u64>,
+) -> Vec<u8> {
+    const OLD: &str = "<wp:docPr id=\"1\" name=\"Figure\" />";
+    let s = String::from_utf8_lossy(xml);
+    if !s.contains(OLD) {
+        return xml.to_vec();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest: &str = &s;
+    while let Some(i) = rest.find(OLD) {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + OLD.len()..];
+        // 这张图自己的 r:embed（在下一个 docPr 之前）
+        let scope = &after[..after.find("<wp:docPr ").unwrap_or(after.len())];
+        let alt = attr(scope, "r:embed")
+            .and_then(|rid| key_of(&rid))
+            .and_then(|k| alts.get_mut(&k))
+            .and_then(|q| q.pop_front())
+            .filter(|a| !a.is_empty());
+        *no += 1;
+        let _ = write!(out, "<wp:docPr id=\"{no}\" name=\"Picture {no}\"");
+        if let Some(a) = alt {
+            let _ = write!(out, " descr=\"{}\"", xml_attr(&a));
+        }
+        out.push_str(" />");
+        rest = after;
+    }
+    out.push_str(rest);
+    out.into_bytes()
+}
+
+type Alts = BTreeMap<u64, std::collections::VecDeque<String>>;
+
+/// XML 属性值转义，换行也转成字符引用（不然读回来会变成空格）。
+fn xml_attr(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '"' => o.push_str("&quot;"),
+            '\n' => o.push_str("&#10;"),
+            '\r' => o.push_str("&#13;"),
+            '\t' => o.push_str("&#9;"),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
 /// 把带记号的浮动图片改成衬于文字下方（behindDoc="1"）。
 fn mark_behind(xml: &[u8]) -> Vec<u8> {
     let s = String::from_utf8_lossy(xml);
@@ -715,6 +846,9 @@ struct Ctx<'a> {
     root: Node,
     /// 公式，按记号里的序号排
     maths: Vec<MathSlot>,
+    /// 图片的替代文字，生成 XML 后写进 wp:docPr。docx-rs 会把内容相同的图片合成一份、
+    /// 改掉关系 id，所以按图片内容分组，每组按建图的顺序排（没写的也占一个位置）
+    alts: Alts,
 }
 
 impl Ctx<'_> {
@@ -825,6 +959,9 @@ impl Ctx<'_> {
             Component::Table(p) => self.table(n, p),
             Component::Image(p) => self.image(n, p),
             Component::PageBreak(_) => self.page_break(),
+            Component::ColumnBreak(_) => self.blocks.push(Block::P(
+                Paragraph::new().add_run(Run::new().add_break(BreakType::Column)),
+            )),
             Component::Section(p) => {
                 let lay = p.layout();
                 let page = &lay.page;
@@ -1207,7 +1344,7 @@ impl Ctx<'_> {
                 } else {
                     cell.width(*width, WidthType::Dxa)
                 };
-                if let Some(bg) = &part.background {
+                if let Some(bg) = part.bg() {
                     cell = cell.shading(shading(bg));
                 }
                 // 两格之间的线只写一次：上下之间写在上面一格的下边，左右之间写在左边一格的右边。
@@ -1379,6 +1516,7 @@ impl Ctx<'_> {
             w = self.content_width_pt;
         }
         let mut pic = Pic::new(&asset.bytes).size(units::emu(w), units::emu(h));
+        self.alt(&pic, &p.alt);
         if let Some(r) = s.rotation {
             pic = pic.rotate((r.rem_euclid(360.0)) as u16);
         }
@@ -1623,7 +1761,7 @@ impl Ctx<'_> {
         if let Some(d) = s.direction {
             p.property = p.property.bidi(d == crate::style::Direction::Rtl);
         }
-        if let Some(bg) = &s.background {
+        if let Some(bg) = s.bg() {
             p.property = p.property.shading(shading(bg));
         }
         let mut borders = ParagraphBorders::with_empty();
@@ -1646,7 +1784,7 @@ impl Ctx<'_> {
         }
         if has_border {
             p.property = p.property.set_borders(borders);
-        } else if Edge::ALL.iter().any(|e| s.padding_side(*e).is_some()) && s.background.is_some() {
+        } else if Edge::ALL.iter().any(|e| s.padding_side(*e).is_some()) && s.bg().is_some() {
             self.warn
                 .unsupported(FORMAT, "padding（段落只在有边框时生效）", id);
         }
@@ -1674,6 +1812,8 @@ impl Ctx<'_> {
             let mut run = Run::new();
             if let Some(src) = &r.image {
                 if let Some(pic) = self.inline_pic(id, src, r.width, r.height) {
+                    // 行内图片的 text 就是替代文字
+                    self.alt(&pic, &r.text);
                     p = p.add_run(Run::new().add_image(pic));
                 }
                 continue;
@@ -1722,6 +1862,14 @@ impl Ctx<'_> {
             };
         }
         p
+    }
+
+    /// 记下一张图的替代文字。每张图都要记，空的也记，好和 XML 里的顺序对上。
+    fn alt(&mut self, pic: &Pic, alt: &str) {
+        self.alts
+            .entry(bytes_key(&pic.image))
+            .or_default()
+            .push_back(alt.to_string());
     }
 
     /// 行内图片（runs 里的 image）：按写的宽高，只写一边时按比例。
@@ -1816,7 +1964,7 @@ impl Ctx<'_> {
             run = run.vanish();
         }
         // 任意颜色的高亮和行内背景都用底纹表达（w:highlight 只有 16 种固定色）
-        if let Some(bg) = s.background.as_ref() {
+        if let Some(bg) = s.bg() {
             run = run.shading(shading(bg));
         } else if let Some(h) = &s.highlight {
             run = run.shading(Shading::new().shd_type(ShdType::Clear).fill(h.rgb()));
