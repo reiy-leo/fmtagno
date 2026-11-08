@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" width="128" alt="fmtagno"></p>
+
 # fmtagno
 
 一份 JSON，出 Word、PDF 和网页。
