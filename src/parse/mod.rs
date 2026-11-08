@@ -1227,7 +1227,7 @@ impl Ctx {
 
     /// 先把正文段落（不含表格里的）读一遍，记下各类段落的有效样式。
     fn prepass(&mut self, body: Node) {
-        let warns = std::mem::take(&mut self.warns);
+        // 警告都按键去重，预扫时报的留着，正式处理时不会重复
         let frames = std::mem::take(&mut self.frames);
         let paras: Vec<Node> = body
             .descendants()
@@ -1267,7 +1267,6 @@ impl Ctx {
             stats.push((kind, eff));
         }
         self.stats = stats;
-        self.warns = warns;
         self.frames = frames;
         self.toc_started = None;
     }
@@ -2008,14 +2007,18 @@ impl Ctx {
         }
         style.italic = base.italic;
         if !conv.unsupported.is_empty() {
-            self.warns.push(format!(
-                "公式 `{latex}` 里有 {} 转不成 LaTeX，这部分只留了文字",
-                conv.unsupported.join("、")
-            ));
+            self.warns.once(
+                &format!("mathpart:{latex}"),
+                format!(
+                    "公式 `{latex}` 里有 {} 转不成 LaTeX，这部分只留了文字",
+                    conv.unsupported.join("、")
+                ),
+            );
         } else if crate::math::to_mathml(&latex, display).is_err() {
-            self.warns.push(format!(
-                "公式转出来的 LaTeX `{latex}` 可能不完全对，渲染时会给警告"
-            ));
+            self.warns.once(
+                &format!("mathbad:{latex}"),
+                format!("公式转出来的 LaTeX `{latex}` 可能不完全对，渲染时会给警告"),
+            );
         }
         self.push_seg(
             out,
@@ -2090,8 +2093,10 @@ impl Ctx {
             return;
         };
         let Some(src) = self.asset(rid) else {
-            self.warns
-                .push(format!("图片 {rid} 在 docx 里找不到，跳过"));
+            self.warns.once(
+                &format!("noimg:{rid}"),
+                format!("图片 {rid} 在 docx 里找不到，跳过"),
+            );
             return;
         };
         let ext = child_ns(box_, WP, "extent");
