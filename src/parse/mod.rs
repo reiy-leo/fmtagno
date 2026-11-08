@@ -462,8 +462,11 @@ fn compact(m: &mut Map<String, Value>) {
         let l = f.get("latin");
         let e = f.get("eastAsia");
         let c = f.get("complex");
-        if l.is_some() && l == e && (c.is_none() || c == l) {
-            let v = l.unwrap().clone();
+        if let Some(v) = l
+            && l == e
+            && (c.is_none() || c == l)
+        {
+            let v = v.clone();
             m.insert("fontFamily".into(), v);
         }
     }
@@ -1000,9 +1003,10 @@ impl Ctx {
             match self.numbering.levels(num_id, &self.styles) {
                 Some((abs, levels)) => {
                     let ilvl = probe.ilvl.unwrap_or(0).min(8);
-                    let mut lp = PPr::default();
-                    lp.ind = levels[ilvl].ind;
-                    ppr.merge(&lp);
+                    ppr.merge(&PPr {
+                        ind: levels[ilvl].ind,
+                        ..PPr::default()
+                    });
                     list = Some(ListRef {
                         num_id,
                         abs,
@@ -1592,10 +1596,8 @@ impl Ctx {
                     }
                     let named = cstyle.as_deref().and_then(|c| self.char_style(c));
                     let mut exp = base.clone();
-                    if *code {
-                        if let Some(b) = builtin("InlineCode") {
-                            exp.merge(&text_of(b));
-                        }
+                    if *code && let Some(b) = builtin("InlineCode") {
+                        exp.merge(&text_of(b));
                     }
                     if let Some(n) = named.as_deref().and_then(|n| self.named_styles.get(n)) {
                         exp.merge(&n.text_only());
@@ -1680,10 +1682,8 @@ impl Ctx {
                         return Gate::Capture(i);
                     }
                 }
-                Some(FieldKind::Link(u)) => {
-                    if href.is_none() {
-                        href = Some(u.clone());
-                    }
+                Some(FieldKind::Link(u)) if href.is_none() => {
+                    href = Some(u.clone());
                 }
                 _ => {}
             }
@@ -3157,7 +3157,7 @@ fn page_json(s: &Sect) -> Map<String, Value> {
             None => counts.push((x, 1)),
         }
     }
-    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    counts.sort_by_key(|c| std::cmp::Reverse(c.1));
     let main = counts[0].0;
     m.insert("margin".into(), json!(main));
     for (i, k) in ["marginTop", "marginRight", "marginBottom", "marginLeft"]

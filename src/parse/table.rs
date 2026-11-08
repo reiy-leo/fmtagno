@@ -27,6 +27,9 @@ struct TCell {
     paras: Vec<Para>,
 }
 
+/// 一个合并块：有效样式、取到段落上的字段、内容。
+type BlockInfo = (Map<String, Value>, Vec<String>, Vec<Seg>);
+
 struct TRow {
     height: Option<(f32, bool)>,
     header: bool,
@@ -262,21 +265,22 @@ impl Ctx {
         // 每个网格位置属于哪个 w:tc
         let mut at: Vec<Vec<Option<usize>>> = vec![vec![None; ncols]; nrows];
         for (i, cl) in cells.iter().enumerate() {
-            for x in cl.c..(cl.c + cl.span).min(ncols) {
-                at[cl.r][x] = Some(i);
+            let end = (cl.c + cl.span).min(ncols);
+            for slot in &mut at[cl.r][cl.c..end] {
+                *slot = Some(i);
             }
         }
         // vMerge：continue 的格子归到上面的起始格
         let mut origin: Vec<usize> = (0..cells.len()).collect();
         let mut row_span: Vec<usize> = vec![1; cells.len()];
         for i in 0..cells.len() {
-            if cells[i].vmerge == Some(false) && cells[i].r > 0 {
-                if let Some(up) = at[cells[i].r - 1][cells[i].c]
-                    && cells[up].vmerge.is_some()
-                {
-                    origin[i] = origin[up];
-                    row_span[origin[i]] += 1;
-                }
+            if cells[i].vmerge == Some(false)
+                && cells[i].r > 0
+                && let Some(up) = at[cells[i].r - 1][cells[i].c]
+                && cells[up].vmerge.is_some()
+            {
+                origin[i] = origin[up];
+                row_span[origin[i]] += 1;
             }
         }
 
@@ -425,7 +429,7 @@ impl Ctx {
         }
 
         // 每块的文字和段落字段
-        let block_info: Vec<(Map<String, Value>, Vec<String>, Vec<Seg>)> = blocks
+        let block_info: Vec<BlockInfo> = blocks
             .iter()
             .map(|&b| {
                 // 竖着合并时，下面几格（continue）里的空段落不算

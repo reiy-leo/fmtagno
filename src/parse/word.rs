@@ -685,15 +685,17 @@ impl PPr {
 
     /// 换成段落字段。`fs` 是这段的字号，用来把行距写回倍数。
     pub fn to_style(&self, fs: f32) -> Style {
-        let mut s = Style::default();
-        s.align = self.jc.as_deref().and_then(|j| match j {
-            "left" | "start" => Some(Align::Left),
-            "center" => Some(Align::Center),
-            "right" | "end" => Some(Align::Right),
-            "both" | "lowKashida" | "mediumKashida" | "highKashida" => Some(Align::Justify),
-            "distribute" | "thaiDistribute" => Some(Align::Distribute),
-            _ => None,
-        });
+        let mut s = Style {
+            align: self.jc.as_deref().and_then(|j| match j {
+                "left" | "start" => Some(Align::Left),
+                "center" => Some(Align::Center),
+                "right" | "end" => Some(Align::Right),
+                "both" | "lowKashida" | "mediumKashida" | "highKashida" => Some(Align::Justify),
+                "distribute" | "thaiDistribute" => Some(Align::Distribute),
+                _ => None,
+            }),
+            ..Style::default()
+        };
         s.space_before = match (self.before_lines, self.before) {
             (Some(l), _) if l != 0.0 => Some(Len::Line(round2(l / 100.0))),
             (_, Some(b)) => Some(pt(b / 20.0)),
