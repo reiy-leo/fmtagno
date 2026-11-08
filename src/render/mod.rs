@@ -3,6 +3,7 @@
 mod common;
 pub mod docx;
 pub mod html;
+pub mod markdown;
 pub mod pdf;
 
 use std::path::{Path, PathBuf};
@@ -16,6 +17,7 @@ pub enum Format {
     Html,
     Docx,
     Pdf,
+    Markdown,
 }
 
 impl Format {
@@ -33,8 +35,9 @@ impl Format {
             "html" | "htm" => Format::Html,
             "docx" => Format::Docx,
             "pdf" => Format::Pdf,
+            "md" | "markdown" => Format::Markdown,
             "xlsx" | "pptx" => bail!("{s} 要到第二版才支持"),
-            other => bail!("不认识的输出格式 `{other}`，现在支持 html、docx、pdf"),
+            other => bail!("不认识的输出格式 `{other}`，现在支持 html、docx、pdf、md"),
         })
     }
 }
@@ -60,5 +63,6 @@ pub fn render(doc: &Doc, tree: &Node, format: Format, opts: &Options) -> Result<
         Format::Html => Ok(html::render(doc, tree, opts)),
         Format::Docx => docx::render(doc, tree, opts),
         Format::Pdf => pdf::render(doc, tree, opts),
+        Format::Markdown => Ok(markdown::render(doc, tree, opts)),
     }
 }

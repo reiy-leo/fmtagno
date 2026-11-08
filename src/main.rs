@@ -11,7 +11,7 @@ use fmtagno::{components, render};
 #[command(
     name = "fmtagno",
     version,
-    about = "把一份 JSON 渲染成 docx / pdf / html"
+    about = "把一份 JSON 渲染成 docx / pdf / html / Markdown"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -51,7 +51,7 @@ enum Cmd {
         /// 输出文件，按扩展名选格式；写 - 表示输出到标准输出，这时要配 --format
         #[arg(short, long)]
         output: PathBuf,
-        /// 指定格式（html、docx、pdf），不写就看输出文件的扩展名
+        /// 指定格式（html、docx、pdf、md），不写就看输出文件的扩展名
         #[arg(short, long)]
         format: Option<String>,
         /// 只对 HTML 有用：内嵌 Paged.js，打开就按页显示（分页、表头重复不用打印也看得到）

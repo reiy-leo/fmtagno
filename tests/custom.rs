@@ -22,7 +22,7 @@ fn example_expands_and_renders_everywhere() {
         "第 1 章：为什么要自定义组件"
     );
     assert!(d.elements["ch1.lead"].props["text"].is_array());
-    for f in [Format::Html, Format::Docx, Format::Pdf] {
+    for f in [Format::Html, Format::Docx, Format::Pdf, Format::Markdown] {
         let out = fmtagno::render_with(json, f, Some(Path::new("examples")), &cat).unwrap();
         assert!(!out.bytes.is_empty());
     }

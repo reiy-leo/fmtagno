@@ -1,4 +1,4 @@
-//! fmtagno：一份 JSON，按组件目录渲染成 docx / pdf / html。
+//! fmtagno：一份 JSON，按组件目录渲染成 docx / pdf / html / Markdown。
 
 pub mod assets;
 pub mod cascade;

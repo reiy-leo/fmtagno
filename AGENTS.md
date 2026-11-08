@@ -25,7 +25,7 @@ src/components.rs   内置组件的 props 和 schema
 src/style.rs        样式字段和取值解析
 src/cascade.rs      样式层叠：样式集、组件样式、部位、继承
 src/custom.rs       自定义组件：定义、校验、展开
-src/render/         各格式渲染器：html、docx、pdf（Typst）；common.rs 放列表编号、表格部位这类共用计算
+src/render/         各格式渲染器：html、docx、pdf（Typst）、markdown；common.rs 放列表编号、表格部位这类共用计算
 tests/              集成测试
 examples/       示例文档；examples/catalog/ 是示例组件定义
 docs/           产品说明和设计文档

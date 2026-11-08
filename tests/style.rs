@@ -12,7 +12,7 @@ fn err(json: &str) -> String {
 }
 
 fn all_formats(json: &str) {
-    for f in [Format::Html, Format::Docx, Format::Pdf] {
+    for f in [Format::Html, Format::Docx, Format::Pdf, Format::Markdown] {
         let out = fmtagno::render_str(json, f, None).unwrap_or_else(|e| panic!("{f:?}: {e:#}"));
         assert!(!out.bytes.is_empty());
     }

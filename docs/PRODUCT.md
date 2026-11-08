@@ -1,6 +1,6 @@
 # fmtagno 产品说明
 
-fmtagno 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版细节，只引用提前注册好的组件，再带一点样式。思路来自 [vercel-labs/json-render](https://github.com/vercel-labs/json-render)。
+fmtagno 把一份 JSON 文档渲染成 docx、pdf、html，也能出 Markdown。JSON 里不写排版细节，只引用提前注册好的组件，再带一点样式。思路来自 [vercel-labs/json-render](https://github.com/vercel-labs/json-render)。
 
 它是本地命令行工具，单个 Rust 二进制，另带一个 MCP server 给 AI 调用。通过 Homebrew 安装。
 
@@ -11,7 +11,7 @@ fmtagno 把一份 JSON 文档渲染成 docx、pdf、html。JSON 里不写排版�
 
 ## 第一版（v0.1）
 
-- 格式：docx、pdf、html。
+- 格式：docx、pdf、html，外加 Markdown（GFM，只留结构不留样式，有合并格的表格写成内嵌 HTML，提示框写成 `> [!NOTE]`）。
 - 内置组件：Heading、Text、Code、List、Table、Image、PageBreak、Divider（分割线）、Quote（引用）、Callout（提示框）、TableOfContents（目录）、Slide、Section（分节），外加根组件 Document；行内有 InlineCode（写在 runs 里）。
 - 命令行：
   - `fmtagno render doc.json -o out.docx`：按输出文件的扩展名选格式。
