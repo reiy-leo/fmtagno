@@ -91,7 +91,7 @@ fn html_has_mathml() {
     let out = render(&doc("x^2", r"\int_0^1 x\,dx"), Format::Html);
     let s = String::from_utf8(out.bytes).unwrap();
     assert!(s.contains("<math><msup>"), "{s}");
-    assert!(s.contains("<math display=\"block\">"), "{s}");
+    assert!(s.contains("<math displaystyle=\"true\">"), "{s}");
     assert!(!s.contains("<script"), "公式不该靠脚本");
 }
 

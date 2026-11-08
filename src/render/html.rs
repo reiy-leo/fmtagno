@@ -101,6 +101,9 @@ code { font: inherit; }
 math { font-family: \"STIX Two Math\", \"Cambria Math\", \"Latin Modern Math\", \"New Computer Modern Math\", math; }
 .fmtagno-math > math { display: inline math; math-style: normal; }
 .fmtagno-math-numbered { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.fmtagno-math-left, .fmtagno-math-right { grid-template-columns: 0 1fr auto; }
+.fmtagno-math-left > math { justify-self: start; }
+.fmtagno-math-right > math { justify-self: end; }
 .fmtagno-eqno { justify-self: end; }
 .fmtagno-list { list-style: none; padding: 0; }
 .fmtagno-marker { display: inline-block; white-space: nowrap; }
@@ -329,7 +332,11 @@ impl Html<'_> {
             Component::Code(p) => self.code(n, p, &st),
             Component::Math(p) => {
                 let body = match crate::math::to_mathml(&p.latex, true) {
-                    Ok(m) => m,
+                    // 写成行内 math 加 displaystyle：仍按块级公式排版，
+                    // 但能跟外层 div 的 text-align 走（Safari 不认 display: inline math）
+                    Ok(m) => {
+                        m.replacen("<math display=\"block\"", "<math displaystyle=\"true\"", 1)
+                    }
                     Err(e) => {
                         self.warn.math_failed(FORMAT, &n.id, &p.latex, &e);
                         format!("<code>{}</code>", esc(&p.latex))
@@ -337,9 +344,17 @@ impl Html<'_> {
                 };
                 match &p.number {
                     Some(no) => {
+                        // 带编号时用网格排：居中是 1fr auto 1fr，靠左靠右另换列宽
+                        let side = if st.contains("text-align:left") {
+                            " fmtagno-math-left"
+                        } else if st.contains("text-align:right") {
+                            " fmtagno-math-right"
+                        } else {
+                            ""
+                        };
                         let _ = writeln!(
                             self.out,
-                            "<div class=\"fmtagno-math fmtagno-math-numbered\" id=\"{id}\"{st}><span></span>{body}<span class=\"fmtagno-eqno\">({})</span></div>",
+                            "<div class=\"fmtagno-math fmtagno-math-numbered{side}\" id=\"{id}\"{st}><span></span>{body}<span class=\"fmtagno-eqno\">({})</span></div>",
                             esc(&no.to_string())
                         );
                     }
