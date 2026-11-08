@@ -332,6 +332,59 @@ pub fn fills_width(ws: &[ColWidth]) -> bool {
     ws.iter().any(|w| matches!(w, ColWidth::Ratio(_)))
 }
 
+/// auto 列的自然宽度（pt）：按最宽的格子粗估，加左右 padding。非 auto 列是 0。
+pub fn auto_natural(n: &Node, p: &TableProps, g: &Grid, ws: &[ColWidth], pad_pt: f32) -> Vec<f32> {
+    let s = &n.style;
+    (0..g.cols)
+        .map(|c| {
+            if ws[c] != ColWidth::Auto {
+                return 0.0;
+            }
+            (0..g.rows)
+                .filter(|r| g.is_origin(*r, c) && g.slot(*r, c).col_span == 1)
+                .map(|r| {
+                    let part = cell_parts(n, &p.look, g, r, c);
+                    let mut cs = s.inherited();
+                    cs.merge(&part);
+                    let side = |e| part.padding_side(e).unwrap_or(pad_pt);
+                    estimate_text_width(g.slot(r, c).text(), &cs)
+                        + side(Edge::Left)
+                        + side(Edge::Right)
+                        + 3.0
+                })
+                .fold(0.0, f32::max)
+        })
+        .collect()
+}
+
+/// 比例列和 auto 列混写时，auto 列按内容撑开，但最多占一份 1fr：
+/// 把每个 auto 列当成 1fr 算出一份的宽度，内容比这窄就用内容宽（变成固定列），
+/// 比这宽就变成 1fr。这样比例列不会被长内容挤没。没有混写时原样返回。
+/// `avail` 是表格可用总宽（pt）。三种格式用同一个结果，排出来的列宽一致。
+pub fn resolve_auto(ws: &[ColWidth], natural: &[f32], avail: f32) -> Vec<ColWidth> {
+    let ratio: f32 = ws
+        .iter()
+        .map(|w| if let ColWidth::Ratio(x) = w { *x } else { 0.0 })
+        .sum();
+    let autos = ws.iter().filter(|w| **w == ColWidth::Auto).count();
+    if ratio <= 0.0 || autos == 0 {
+        return ws.to_vec();
+    }
+    let fixed: f32 = ws
+        .iter()
+        .map(|w| if let ColWidth::Fixed(x) = w { *x } else { 0.0 })
+        .sum();
+    let share = ((avail - fixed) / (ratio + autos as f32)).max(0.0);
+    ws.iter()
+        .zip(natural)
+        .map(|(w, a)| match w {
+            ColWidth::Auto if *a < share => ColWidth::Fixed(*a),
+            ColWidth::Auto => ColWidth::Ratio(1.0),
+            w => w.clone(),
+        })
+        .collect()
+}
+
 /// 粗估一段文字排成一行要多宽（pt），给 docx 的 auto 列算初始列宽用：
 /// 全角字算 1em，半角算 0.6em（宁宽勿窄，窄了 Word 会折行），再加字间距。有换行时取最长的一行。
 pub fn estimate_text_width(t: &Inline, cs: &Style) -> f32 {
@@ -493,4 +546,51 @@ pub fn rebase_runs(t: &Inline, old: &Style, new: &Style) -> Vec<Run> {
             r
         })
         .collect()
+}
+
+/// 目录里的一项。
+pub struct TocEntry {
+    pub level: u8,
+    pub text: String,
+    pub id: String,
+}
+
+/// 按文档顺序收 1 到 depth 级标题，给 docx、html 的目录用（PDF 交给 typst 的 outline）。
+pub fn toc_entries(root: &Node, depth: u8) -> Vec<TocEntry> {
+    fn walk(n: &Node, depth: u8, out: &mut Vec<TocEntry>) {
+        if let crate::components::Component::Heading(h) = &n.component
+            && h.level <= depth
+        {
+            out.push(TocEntry {
+                level: h.level,
+                text: h.text.plain_text(),
+                id: n.id.clone(),
+            });
+        }
+        for c in &n.children {
+            walk(c, depth, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, depth, &mut out);
+    out
+}
+
+/// 目录标题的样式：目录的可继承字段加 title 部位。
+pub fn toc_title_style(n: &Node) -> Style {
+    let mut s = n.style.inherited();
+    s.merge(&n.part("title"));
+    s
+}
+
+/// 目录项的样式：目录的可继承字段加 entry 部位，再按级缩进 listIndent × (级数 - 1)。
+pub fn toc_entry_style(n: &Node, level: u8) -> Style {
+    let mut s = n.style.inherited();
+    s.merge(&n.part("entry"));
+    let fs = s.size_pt();
+    let step = s.list_indent.map(|x| x.pt(fs, 0.0)).unwrap_or(fs * 1.5);
+    let base = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
+    s.margin_left = Some(crate::style::Len::Pt(base + step * (level as f32 - 1.0)));
+    s.list_indent = None;
+    s
 }

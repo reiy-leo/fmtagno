@@ -17,7 +17,10 @@ use docx_rs::{
 
 use crate::{
     assets,
-    components::{CodeProps, Component, Field, ImageProps, ListProps, Run as PRun, TableProps},
+    components::{
+        CodeProps, Component, Field, ImageProps, ListProps, Run as PRun, TableOfContentsProps,
+        TableProps,
+    },
     doc::{Doc, Node, Page, SectionLayout},
     render::{
         Options, Output,
@@ -63,6 +66,30 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
                 .based_on("Normal"),
         )
         .add_style(Style::new("InlineCode", StyleType::Character).name("InlineCode"));
+    // Word 更新目录域时用「目录 1–6」样式重写各项，按第一个目录的 entry 样式定义它们，
+    // 更新后缩进、间距、字号才和更新前一样
+    if let Some(toc) = find_toc(tree) {
+        for lvl in 1..=6u8 {
+            let es = common::toc_entry_style(toc, lvl);
+            let fs = es.size_pt();
+            let pt = |l: Option<Len>| l.map_or(0, |x| units::twip(x.pt(fs, 0.0)).max(0) as u32);
+            let mut st = Style::new(format!("TOC{lvl}"), StyleType::Paragraph)
+                .name(format!("toc {lvl}"))
+                .based_on("Normal")
+                .next("Normal")
+                .size((fs * 2.0).round() as usize)
+                .indent(Some(pt(es.margin_left) as i32), None, None, None)
+                .line_spacing(
+                    LineSpacing::new()
+                        .before(pt(es.space_before))
+                        .after(pt(es.space_after)),
+                );
+            if let Some(c) = &es.color {
+                st = st.color(c.rgb());
+            }
+            docx = docx.add_style(st);
+        }
+    }
 
     let mut r = Ctx {
         warn,
@@ -74,6 +101,7 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
         numberings: Vec::new(),
         repeat_heads: Vec::new(),
         sections: Vec::new(),
+        root: tree.clone(),
     };
     r.node(tree);
     let sections = std::mem::take(&mut r.sections);
@@ -487,6 +515,8 @@ struct Ctx<'a> {
     repeat_heads: Vec<bool>,
     /// 每节的版面和内容
     sections: Vec<(SectionLayout, Vec<Block>)>,
+    /// 整棵树，目录要从里面收标题
+    root: Node,
 }
 
 impl Ctx<'_> {
@@ -522,6 +552,24 @@ impl Ctx<'_> {
                 let para = self.inline(para, p.text.runs().cloned().collect(), &n.id);
                 self.blocks.push(Block::P(para));
             }
+            Component::Quote(p) => {
+                let bs = boxed(s);
+                let para = self.para(Paragraph::new(), &bs, &n.id);
+                let para = self.inline(para, p.text.runs().cloned().collect(), &n.id);
+                self.blocks.push(Block::P(para));
+            }
+            Component::Callout(p) => {
+                let bs = boxed(s);
+                let para = self.para(Paragraph::new(), &bs, &n.id);
+                let para = self.inline(para, p.text.runs().cloned().collect(), &n.id);
+                self.blocks.push(Block::P(para));
+            }
+            Component::Divider(_) => {
+                // 空段落，行高按样式（默认固定 1pt），线画在段落下边
+                let para = self.para(Paragraph::new(), s, &n.id);
+                self.blocks.push(Block::P(para));
+            }
+            Component::TableOfContents(p) => self.toc(n, p),
             Component::Code(p) => self.code(n, p),
             Component::List(p) => self.list(n, p),
             Component::Table(p) => self.table(n, p),
@@ -602,6 +650,66 @@ impl Ctx<'_> {
         self.blocks.push(Block::P(
             Paragraph::new().add_run(Run::new().add_break(BreakType::Page)),
         ));
+    }
+
+    /// 目录：Word 的 TOC 域，先填好标题文字（没有页码），打开后更新域就有页码。
+    fn toc(&mut self, n: &Node, p: &TableOfContentsProps) {
+        let depth = p.depth();
+        if let Some(t) = &p.title {
+            let ts = common::toc_title_style(n);
+            let para = self.para(Paragraph::new(), &ts, &n.id);
+            let para = para.add_run(self.run_props(Run::new().add_text(t), &ts.text_only(), &n.id));
+            self.blocks.push(Block::P(para));
+        }
+        let entries = common::toc_entries(&self.root, depth);
+        let instr = format!("TOC \\o \"1-{depth}\" \\h \\z \\u");
+        let begin = [
+            Run::new().add_field_char(FieldCharType::Begin, true),
+            Run::new().add_instr_text(InstrText::Unsupported(instr)),
+            Run::new().add_field_char(FieldCharType::Separate, false),
+        ];
+        let after = n.style.space_after;
+        if entries.is_empty() {
+            let mut es = common::toc_entry_style(n, 1);
+            es.space_after = after.or(es.space_after);
+            let mut para = self.para(Paragraph::new(), &es, &n.id);
+            for r in begin {
+                para = para.add_run(r);
+            }
+            para = para.add_run(Run::new().add_field_char(FieldCharType::End, false));
+            self.blocks.push(Block::P(para));
+            return;
+        }
+        let last = entries.len() - 1;
+        let tab = units::twip(self.content_width_pt).max(0) as usize;
+        let mut begin = Some(begin);
+        for (i, e) in entries.iter().enumerate() {
+            let mut es = common::toc_entry_style(n, e.level);
+            if i == last && after.is_some() {
+                es.space_after = after;
+            }
+            let mut para = self.para(
+                Paragraph::new().style(&format!("TOC{}", e.level)).add_tab(
+                    docx_rs::Tab::new()
+                        .val(docx_rs::TabValueType::Right)
+                        .leader(docx_rs::TabLeaderType::Dot)
+                        .pos(tab),
+                ),
+                &es,
+                &n.id,
+            );
+            if let Some(b) = begin.take() {
+                for r in b {
+                    para = para.add_run(r);
+                }
+            }
+            para =
+                para.add_run(self.run_props(Run::new().add_text(&e.text), &es.text_only(), &n.id));
+            if i == last {
+                para = para.add_run(Run::new().add_field_char(FieldCharType::End, false));
+            }
+            self.blocks.push(Block::P(para));
+        }
     }
 
     fn code(&mut self, n: &Node, p: &CodeProps) {
@@ -759,27 +867,14 @@ impl Ctx<'_> {
             .unwrap_or(4.0);
         let pad = units::twip(pad_pt);
         let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let nat = common::auto_natural(n, p, &g, &ws, pad_pt);
+        let ws = common::resolve_auto(&ws, &nat, width_pt);
         let fills = common::fills_width(&ws);
         // auto 列按最宽的格子估一个初始宽度，Word 打开时按 autofit 自己再排
-        let auto_pt: Vec<f32> = (0..g.cols)
-            .map(|c| {
-                if ws[c] != ColWidth::Auto {
-                    return 0.0;
-                }
-                (0..g.rows)
-                    .filter(|r| g.is_origin(*r, c) && g.slot(*r, c).col_span == 1)
-                    .map(|r| {
-                        let part = common::cell_parts(n, &p.look, &g, r, c);
-                        let mut cs = s.inherited();
-                        cs.merge(&part);
-                        let side = |e| part.padding_side(e).unwrap_or(pad_pt);
-                        common::estimate_text_width(g.slot(r, c).text(), &cs)
-                            + side(Edge::Left)
-                            + side(Edge::Right)
-                            + 3.0
-                    })
-                    .fold(0.0, f32::max)
-            })
+        let auto_pt: Vec<f32> = ws
+            .iter()
+            .zip(&nat)
+            .map(|(w, a)| if *w == ColWidth::Auto { *a } else { 0.0 })
             .collect();
         let fixed_sum: f32 = ws
             .iter()
@@ -1124,9 +1219,21 @@ impl Ctx<'_> {
         }
         ps.width = None;
         ps.height = None;
-        let para = self
-            .para(Paragraph::new(), &ps, &n.id)
-            .add_run(Run::new().add_image(pic));
+        let mut para = self.para(Paragraph::new(), &ps, &n.id);
+        // 按页或页边距定位的图片不该占正文的行：Word 的锚点得落在一个段落里，
+        // 把这个段落压成 1pt 高、无段前段后，别把后面的内容往下推（PDF、HTML 里它本来就不占位）
+        if s.position == Some(Position::Absolute)
+            && !matches!(s.anchor_to, Some(AnchorTo::Paragraph))
+        {
+            para = para.line_spacing(
+                LineSpacing::new()
+                    .before(0)
+                    .after(0)
+                    .line(20)
+                    .line_rule(LineSpacingType::Exact),
+            );
+        }
+        let para = para.add_run(Run::new().add_image(pic).size(2));
         self.blocks.push(Block::P(para));
         if let Some(c) = &p.caption {
             let mut cs = s.inherited();
@@ -1199,7 +1306,15 @@ impl Ctx<'_> {
         if any {
             p = p.line_spacing(ls);
         }
-        let left = s.margin_left.map(|l| units::twip(l.pt(fs, 0.0)));
+        // Word 的 hanging 是首行往左伸出去；我们的 hangingIndent 是首行不动、其余行往里缩，
+        // 和 PDF、HTML 一样，所以左缩进要加上悬挂量
+        let left = match (s.margin_left, s.hanging_indent) {
+            (ml, Some(h)) => Some(units::twip(
+                ml.map(|l| l.pt(fs, 0.0)).unwrap_or(0.0) + h.pt(fs, 0.0),
+            )),
+            (Some(l), None) => Some(units::twip(l.pt(fs, 0.0))),
+            (None, None) => None,
+        };
         let right = s.margin_right.map(|l| units::twip(l.pt(fs, 0.0)));
         let special = match (s.hanging_indent, s.text_indent) {
             (Some(h), _) => Some(SpecialIndentType::Hanging(units::twip(h.pt(fs, 0.0)))),
@@ -1497,6 +1612,32 @@ fn border_type(b: &Border) -> BorderType {
 /// 线宽换成 1/8 pt，Word 只认 2 到 96。
 fn eighths(pt: f32) -> usize {
     ((pt * 8.0).round() as usize).clamp(2, 96)
+}
+
+fn find_toc(n: &Node) -> Option<&Node> {
+    if matches!(n.component, Component::TableOfContents(_)) {
+        return Some(n);
+    }
+    n.children.iter().find_map(find_toc)
+}
+
+/// Word 把段落左右边框画在缩进外面（伸进页边），PDF、HTML 画在盒子边上、字往里缩。
+/// 把内边距和线宽加进左右缩进，三种格式的字和线就对齐了。
+fn boxed(s: &PStyle) -> PStyle {
+    let mut b = s.clone();
+    let fs = s.size_pt();
+    for (e, m) in [
+        (Edge::Left, &mut b.margin_left),
+        (Edge::Right, &mut b.margin_right),
+    ] {
+        let Some(line) = s.border_side(e).filter(|x| x.width > 0.0) else {
+            continue;
+        };
+        let add = s.padding_side(e).unwrap_or(0.0) + line.width;
+        let base = m.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
+        *m = Some(Len::Pt(base + add));
+    }
+    b
 }
 
 fn para_border(pos: ParagraphBorderPosition, b: &Border, space_pt: f32) -> ParagraphBorder {

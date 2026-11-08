@@ -1,5 +1,5 @@
 {
-  "name": "Callout",
+  "name": "Notice",
   "description": "带标题的提示框，子元素放在标题下面",
   "container": true,
   "props": {

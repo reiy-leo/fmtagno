@@ -11,6 +11,7 @@ JSON 里只引用注册好的组件（标题、正文、列表、表格、图片
 ```sh
 fmtagno render report.json -o report.docx
 fmtagno render report.json -o report.pdf
+fmtagno render report.json -o report.md     # Markdown，只留结构
 fmtagno render report.json -o report.html --paged   # 屏幕上按页显示
 fmtagno check report.json
 fmtagno render report.json -o report.html --catalog my-components/ --style-sets themes/ --style-set formal

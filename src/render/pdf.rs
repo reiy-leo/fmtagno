@@ -11,7 +11,7 @@ use typst::{
     diag::{FileError, FileResult},
     foundations::{Bytes, Datetime, Duration},
     syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot},
-    text::{Font, FontBook},
+    text::{Font, FontBook, FontInfo, FontVariant, FontWeight},
     utils::LazyHash,
 };
 use typst_kit::fonts::{self, FontStore};
@@ -19,7 +19,10 @@ use typst_layout::PagedDocument;
 
 use crate::{
     assets,
-    components::{CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableProps},
+    components::{
+        CodeProps, Component, Field, ImageProps, Inline, ListProps, Run, TableOfContentsProps,
+        TableProps,
+    },
     doc::{Doc, HfNodes, Node, SectionLayout},
     render::{
         Options, Output,
@@ -48,9 +51,7 @@ const FONTS: &[&str] = &[
     "Libertinus Serif",
 ];
 const MONO_FONTS: &[&str] = &["Menlo", "Consolas", "DejaVu Sans Mono"];
-/// 文字盒高度（ascender 到 descender）约等于字号的这么多倍，用来把行高倍数换成 typst 的 leading。
-const GLYPH_BOX: f32 = 1.17;
-/// 行盒基线以上、以下的部分（合起来是 GLYPH_BOX），按常见中文字体估的。
+/// 找不到字体度量时，行盒基线以上、以下的部分，按常见中文字体估的。
 const ASCENT: f32 = 0.88;
 const DESCENT: f32 = 0.29;
 
@@ -146,6 +147,7 @@ pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<Str
         warn: Warn::default(),
         opts,
         margins: [0.0; 4],
+        content_width: 0.0,
     };
     m.preamble(doc);
     let base = Style::default();
@@ -154,6 +156,9 @@ pub fn markup(doc: &Doc, tree: &Node, opts: &Options) -> (String, Files, Vec<Str
     (m.out, m.files, m.warn.list)
 }
 
+// Word 在节开头和手动分页之后保留段前距，typst 会把页顶的 above 吞掉；放一个零高的块垫着
+const TOP_ANCHOR: &str = "#block(height: 0pt, above: 0pt, below: 0pt)\n";
+
 struct Markup<'a> {
     out: String,
     files: Files,
@@ -161,6 +166,8 @@ struct Markup<'a> {
     opts: &'a Options,
     /// 上右下左页边距，pt
     margins: [f32; 4],
+    /// 当前节版心（一栏）的宽度，pt；auto 列和比例列混写时用来分宽度
+    content_width: f32,
 }
 
 impl Markup<'_> {
@@ -247,11 +254,25 @@ impl Markup<'_> {
                 }
                 self.block(format!("#par[{body}]"), s, parent, &n.id);
             }
+            Component::Quote(p) => {
+                let body = self.inline(&p.text, s);
+                self.block(format!("#par[{body}]"), s, parent, &n.id);
+            }
+            Component::Callout(p) => {
+                let body = self.inline(&p.text, s);
+                self.block(format!("#par[{body}]"), s, parent, &n.id);
+            }
+            // 空盒子，线是它的下边框
+            Component::Divider(_) => self.block(String::new(), s, parent, &n.id),
+            Component::TableOfContents(p) => self.toc(n, p, parent),
             Component::Code(p) => self.code(n, p, parent),
             Component::List(p) => self.list(n, p, parent),
             Component::Table(p) => self.table(n, p, parent),
             Component::Image(p) => self.image(n, p, parent),
-            Component::PageBreak(_) => self.out.push_str("#pagebreak()\n"),
+            Component::PageBreak(_) => {
+                self.out.push_str("#pagebreak()\n");
+                self.out.push_str(TOP_ANCHOR);
+            }
             Component::Section(p) => self.section(n, p.layout(), parent),
         }
     }
@@ -268,6 +289,12 @@ impl Markup<'_> {
         let gutter = page.gutter.map(|g| g.abs_pt()).unwrap_or(0.0);
         self.margins = [mt, mr, mb, ml + gutter];
         let cols = page.columns.as_ref().map_or(1, |c| c.count());
+        let gap = page
+            .columns
+            .as_ref()
+            .filter(|c| c.count() > 1)
+            .map_or(0.0, |c| c.gap_pt());
+        self.content_width = ((w - ml - mr - gutter) - gap * (cols as f32 - 1.0)) / cols as f32;
         let (hd, fd) = page.hf_distance_pt();
         let header = self.hf_src(&lay.header, lay, parent, true, hd);
         let footer = self.hf_src(&lay.footer, lay, parent, false, fd);
@@ -287,6 +314,7 @@ impl Markup<'_> {
             .page_number_start
             .map_or("none".to_string(), |x| x.to_string());
         let _ = writeln!(o, "#metadata({start}) <fmtagno-sec>");
+        o.push_str(TOP_ANCHOR);
         self.out.push_str(&o);
         let body = self.children_src(n);
         let src = self.scope_src(body, &n.style, parent, &n.id);
@@ -388,16 +416,9 @@ impl Markup<'_> {
             // 像 CSS 那样把多出来的行距对半分到每行上下（half-leading），
             // 单行的段落、列表项也就有了行高，和 HTML、Word 的间距对得上。
             // 行间距交给行盒，leading 归零。
-            let half = match l {
-                LineHeight::Multiple(x) => format!("{:.3}em", ((x - GLYPH_BOX) / 2.0).max(0.0)),
-                LineHeight::Exact(x) | LineHeight::AtLeast(x) => {
-                    format!("{:.2}pt", ((x.pt(fs, 0.0) - GLYPH_BOX * fs) / 2.0).max(0.0))
-                }
-            };
-            let _ = writeln!(
-                sets,
-                "#set text(top-edge: {ASCENT}em + {half}, bottom-edge: -{DESCENT}em - {half})"
-            );
+            // 基线上下各占多少按字体自己的 ascender/descender 分（Word 也是），
+            // 不然像 MiSans 这种下沉较深的字体，字在行盒里会偏上
+            let _ = writeln!(sets, "#set text({})", line_edges(s, l, fs));
             par.push("leading: 0pt".into());
         }
         if changed!(align) {
@@ -529,12 +550,21 @@ impl Markup<'_> {
             ],
             [ins[0], ins[1], ins[2], ins[3]],
         );
-        let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
         let ml = s.margin_left.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         let mr = s.margin_right.map(|x| x.pt(fs, 0.0)).unwrap_or(0.0);
         if ml != 0.0 || mr != 0.0 {
-            let _ = writeln!(src, "#pad(left: {ml}pt, right: {mr}pt)[{inner}]");
+            // 段前段后距要放在 pad 外层的块上，放在 pad 里面会被当成容器开头吞掉
+            let (gap, rest): (Vec<String>, Vec<String>) = args
+                .into_iter()
+                .partition(|a| a.starts_with("above:") || a.starts_with("below:"));
+            let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", rest.join(", "));
+            let _ = writeln!(
+                src,
+                "#block({})[#pad(left: {ml}pt, right: {mr}pt)[{inner}]]",
+                gap.join(", ")
+            );
         } else {
+            let inner = format!("#block({})[\n{dbl}{sets}{body}\n]", args.join(", "));
             let _ = writeln!(src, "{inner}");
         }
         src
@@ -595,6 +625,9 @@ impl Markup<'_> {
         for r in t.runs() {
             out.push_str(&self.run(r, para));
         }
+        if t.ends_with_break() {
+            out.push_str("#\"\u{200B}\"");
+        }
         out
     }
 
@@ -603,6 +636,9 @@ impl Markup<'_> {
         let mut out = String::new();
         for r in common::rebase_runs(t, old, new) {
             out.push_str(&self.run(&r, new));
+        }
+        if t.ends_with_break() {
+            out.push_str("#\"\u{200B}\"");
         }
         out
     }
@@ -700,6 +736,36 @@ impl Markup<'_> {
         piece
     }
 
+    /// 目录：typst 的 outline，页码由 typst 排完算出。
+    fn toc(&mut self, n: &Node, p: &TableOfContentsProps, parent: &Style) {
+        let s = &n.style;
+        let mut body = String::new();
+        if let Some(t) = &p.title {
+            let ts = common::toc_title_style(n);
+            let src = self.block_src(format!("#par[#{}]", lit(t)), &ts, s, &n.id);
+            body.push_str(&src);
+        }
+        let e1 = common::toc_entry_style(n, 1);
+        let e2 = common::toc_entry_style(n, 2);
+        let fs = e1.size_pt();
+        let ml = |x: &Style| x.margin_left.map_or(0.0, |l| l.pt(fs, 0.0));
+        let base = ml(&e1);
+        let step = ml(&e2) - base;
+        let above = e1.space_before.map_or(0.0, |l| l.pt(fs, 0.0));
+        let below = e1.space_after.map_or(0.0, |l| l.pt(fs, 0.0));
+        let mut es = e1.clone();
+        es.margin_left = None;
+        es.space_before = None;
+        es.space_after = None;
+        let ol = format!(
+            "#show outline.entry: it => block(above: {above}pt, below: {below}pt, inset: (left: {base}pt + (it.level - 1) * {step}pt), link(it.element.location(), [#it.body()#box(width: 1fr, repeat(gap: 0.15em)[.])#it.page()]))\n#outline(title: none, depth: {}, indent: 0pt)",
+            p.depth()
+        );
+        let src = self.block_src(ol, &es, s, &n.id);
+        body.push_str(&src);
+        self.block(body, s, parent, &n.id);
+    }
+
     fn code(&mut self, n: &Node, p: &CodeProps, parent: &Style) {
         let s = &n.style;
         let mut body = format!(
@@ -793,7 +859,18 @@ impl Markup<'_> {
     fn table(&mut self, n: &Node, p: &TableProps, parent: &Style) {
         let g = Grid::of(p);
         let s = &n.style;
-        let widths: Vec<String> = common::col_widths(p, &g, &mut self.warn, &n.id)
+        let pad = s
+            .cell_padding
+            .map(|x| x.pt(s.size_pt(), 0.0))
+            .unwrap_or(4.0);
+        let ws = common::col_widths(p, &g, &mut self.warn, &n.id);
+        let avail = match s.width {
+            Some(Len::Pct(x)) => self.content_width * x / 100.0,
+            Some(w) => w.abs_pt(),
+            None => self.content_width,
+        };
+        let nat = common::auto_natural(n, p, &g, &ws, pad);
+        let widths: Vec<String> = common::resolve_auto(&ws, &nat, avail)
             .iter()
             .map(|w| match w {
                 ColWidth::Ratio(x) => format!("{x}fr"),
@@ -801,10 +878,6 @@ impl Markup<'_> {
                 ColWidth::Auto => "auto".to_string(),
             })
             .collect();
-        let pad = s
-            .cell_padding
-            .map(|x| x.pt(s.size_pt(), 0.0))
-            .unwrap_or(4.0);
         let mut header = Vec::new();
         let mut body = Vec::new();
         g.warn_ragged(&mut self.warn, &n.id);
@@ -827,6 +900,12 @@ impl Markup<'_> {
                 let mut sets = self.text_args(&cs, s, &n.id);
                 if !sets.is_empty() {
                     sets = format!("#set text({sets})\n");
+                }
+                // 格子自己的行高（比如表头的 lineHeight）
+                if let Some(l) = cs.line_height
+                    && (s.line_height != cs.line_height || s.font_size != cs.font_size)
+                {
+                    let _ = writeln!(sets, "#set text({})", line_edges(&cs, l, cs.size_pt()));
                 }
                 if let Some(a) = cs.align.filter(|a| s.align != Some(*a)) {
                     let a = match a {
@@ -1206,15 +1285,105 @@ fn font_list(s: &Style, mono: bool) -> String {
     lits(&refs)
 }
 
+/// 样式里第一个找得到的字体的 ascender、descender（em，descender 取正）。
+/// 都找不到就用按常见中文字体估的值。
+fn edge_metrics(s: &Style) -> (f32, f32) {
+    let store = font_store();
+    let mut fams: Vec<String> = Vec::new();
+    if let Some(f) = &s.font_family {
+        for x in f.fallback() {
+            fams.extend(
+                x.split(',')
+                    .map(|y| y.trim().to_string())
+                    .filter(|y| !y.is_empty()),
+            );
+        }
+    }
+    fams.extend(FONTS.iter().map(|x| x.to_string()));
+    for fam in fams {
+        let Some(i) = store
+            .book()
+            .select(&fam.to_lowercase(), FontVariant::default())
+        else {
+            continue;
+        };
+        if let Some(font) = store.font(i)
+            && let Ok(face) = ttf_parser::Face::parse(font.data(), font.index())
+        {
+            let u = face.units_per_em() as f32;
+            let (a, d) = (face.ascender() as f32 / u, -(face.descender() as f32) / u);
+            if a > 0.0 && d >= 0.0 {
+                return (a, d);
+            }
+        }
+    }
+    (ASCENT, DESCENT)
+}
+
 /// 字体只扫一次：typst 自带字体加系统字体。
 fn font_store() -> &'static FontStore {
     static STORE: OnceLock<FontStore> = OnceLock::new();
     STORE.get_or_init(|| {
         let mut s = FontStore::new();
         s.extend(fonts::embedded());
-        s.extend(fonts::system());
+        let mut sys: Vec<_> = fonts::system().collect();
+        // 一族里只要有一个字重不是整百，整族都按名字归一，免得 Heavy 正好是 700 抢了 Bold
+        let odd: std::collections::HashSet<String> = sys
+            .iter()
+            .filter(|(_, i)| i.variant.weight.to_number() % 100 != 0)
+            .map(|(_, i)| i.family.clone())
+            .collect();
+        for (path, info) in sys.iter_mut() {
+            if odd.contains(&info.family) {
+                normalize_weight(info, &path.path, path.index);
+            }
+        }
+        s.extend(sys);
         s
     })
+}
+
+/// 有的字体 OS/2 里的字重不是整百，比如 MiSans：Regular 330、Medium 380、Bold 630。
+/// typst 按数值找最近的字重，要 400 会拿到 Medium，要 700 会拿到 Heavy。
+/// 这种字体整族按各自的字重名（Regular、Bold……）改成标准数值；认不出的名字不动。
+fn normalize_weight(info: &mut FontInfo, path: &std::path::Path, index: u32) {
+    let Ok(data) = std::fs::read(path) else {
+        return;
+    };
+    let Ok(face) = ttf_parser::Face::parse(&data, index) else {
+        return;
+    };
+    let name = |id: u16| {
+        face.names()
+            .into_iter()
+            .filter(|n| n.name_id == id && n.is_unicode())
+            .find_map(|n| n.to_string())
+    };
+    let Some(sub) = name(ttf_parser::name_id::TYPOGRAPHIC_SUBFAMILY)
+        .or_else(|| name(ttf_parser::name_id::SUBFAMILY))
+    else {
+        return;
+    };
+    let key: String = sub
+        .to_lowercase()
+        .replace("italic", "")
+        .replace("oblique", "")
+        .chars()
+        .filter(|c| c.is_ascii_alphabetic())
+        .collect();
+    let w = match key.as_str() {
+        "thin" | "hairline" => 100,
+        "extralight" | "ultralight" => 200,
+        "light" => 300,
+        "regular" | "book" | "" => 400,
+        "medium" => 500,
+        "semibold" | "demibold" => 600,
+        "bold" => 700,
+        "extrabold" | "ultrabold" => 800,
+        "heavy" | "black" => 900,
+        _ => return,
+    };
+    info.variant.weight = FontWeight::from_number(w);
 }
 
 fn library() -> &'static LazyHash<Library> {
@@ -1274,5 +1443,30 @@ impl World for FmtagnoWorld {
 
     fn today(&self, _offset: Option<Duration>) -> Option<Datetime> {
         None
+    }
+}
+
+/// 行高落到 Typst 的 top-edge/bottom-edge 上。
+fn line_edges(s: &Style, l: LineHeight, fs: f32) -> String {
+    let (asc, desc) = edge_metrics(s);
+    match l {
+        LineHeight::Multiple(x) => {
+            let half = ((x - asc - desc) / 2.0).max(0.0);
+            format!(
+                "top-edge: {:.3}em, bottom-edge: -{:.3}em",
+                asc + half,
+                desc + half
+            )
+        }
+        // 固定行高就是这么高，字体盒比它高也照样压进去（Word 一样）。
+        // 写成「行高一半 ± (asc-desc)/2 em」，格子里单独改了字号也还是这个行高
+        LineHeight::Exact(x) => {
+            let (h, c) = (x.pt(fs, 0.0) / 2.0, (asc - desc) / 2.0);
+            format!("top-edge: {h:.2}pt + {c:.3}em, bottom-edge: -{h:.2}pt + {c:.3}em")
+        }
+        LineHeight::AtLeast(x) => {
+            let half = ((x.pt(fs, 0.0) - (asc + desc) * fs) / 2.0).max(0.0);
+            format!("top-edge: {asc:.3}em + {half:.2}pt, bottom-edge: -{desc:.3}em - {half:.2}pt")
+        }
     }
 }

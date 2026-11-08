@@ -41,5 +41,14 @@ fn table_column_widths_mix_ratio_fixed_auto() {
     let tree = d.tree().unwrap();
     let (src, _, _) = fmtagno::render::pdf::markup(&d, &tree, &Default::default());
     assert!(src.contains("columns: (56.69"), "{src}");
-    assert!(src.contains("pt, auto, 2fr,)"), "{src}");
+    // auto 列按内容量出宽度，写成固定 pt
+    let cols = src
+        .split("columns: (")
+        .nth(1)
+        .unwrap()
+        .split(')')
+        .next()
+        .unwrap();
+    let parts: Vec<_> = cols.split(", ").collect();
+    assert!(parts[1].ends_with("pt") && parts[2] == "2fr,", "{cols}");
 }
