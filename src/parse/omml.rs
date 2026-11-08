@@ -29,9 +29,9 @@ fn on(v: Option<&str>) -> bool {
 
 /// 函数名，写成 \sin 这类命令。
 const FUNCS: &[&str] = &[
-    "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh", "cosh",
-    "tanh", "coth", "log", "ln", "lg", "exp", "lim", "liminf", "limsup", "max", "min", "sup",
-    "inf", "det", "dim", "gcd", "ker", "deg", "arg", "hom", "Pr",
+    "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+    "coth", "log", "ln", "lg", "exp", "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det",
+    "dim", "gcd", "ker", "deg", "arg", "hom", "Pr",
 ];
 
 /// 单个字符对应的 LaTeX 命令。
@@ -377,9 +377,7 @@ impl Omml {
             return String::new();
         }
         match n.tag_name().name() {
-            "oMath" | "e" | "num" | "den" | "sub" | "sup" | "deg" | "lim" | "fName" => {
-                self.seq(n)
-            }
+            "oMath" | "e" | "num" | "den" | "sub" | "sup" | "deg" | "lim" | "fName" => self.seq(n),
             "r" => self.run(n),
             "f" => {
                 let a = self.arg(n, "num");
@@ -387,7 +385,9 @@ impl Omml {
                 match prop(n, "fPr", "type") {
                     Some("lin") => format!("{a}/{b}"),
                     Some("skw") => format!("{{}}^{}/{{}}_{}", group(&a), group(&b)),
-                    Some("noBar") => format!("\\genfrac{{}}{{}}{{0pt}}{{}}{}{}", group(&a), group(&b)),
+                    Some("noBar") => {
+                        format!("\\genfrac{{}}{{}}{{0pt}}{{}}{}{}", group(&a), group(&b))
+                    }
                     _ => format!("\\frac{}{}", group(&a), group(&b)),
                 }
             }
@@ -664,7 +664,10 @@ impl Omml {
                     return format!("\\begin{{cases}}{}\\end{{cases}}", rows.join(" \\\\ "));
                 }
                 // \binom：noBar 分数外面套圆括号
-                if is(k, M, "f") && prop(k, "fPr", "type") == Some("noBar") && beg == "(" && end == ")"
+                if is(k, M, "f")
+                    && prop(k, "fPr", "type") == Some("noBar")
+                    && beg == "("
+                    && end == ")"
                 {
                     let a = self.arg(k, "num");
                     let b = self.arg(k, "den");
@@ -673,7 +676,11 @@ impl Omml {
             }
         }
         let inner: Vec<String> = es.iter().map(|e| self.seq(*e)).collect();
-        let sep = if sep == "|" { "\\mid ".to_string() } else { latex_text(sep, false) };
+        let sep = if sep == "|" {
+            "\\mid ".to_string()
+        } else {
+            latex_text(sep, false)
+        };
         format!(
             "\\left{} {} \\right{}",
             delim(beg, true),
@@ -717,13 +724,15 @@ fn push(out: &mut String, s: &str) {
 fn base(e: &str) -> String {
     let t = e.trim();
     let single = t.chars().count() == 1
-        || (t.starts_with('\\')
-            && t[1..].chars().all(|c| c.is_ascii_alphabetic())
-            && t.len() > 1)
+        || (t.starts_with('\\') && t[1..].chars().all(|c| c.is_ascii_alphabetic()) && t.len() > 1)
         || (t.starts_with("\\left") && t.ends_with(|c: char| c != '}'))
         || t.starts_with("\\mathbf{") && t.matches('{').count() == 1;
     if single || t.is_empty() {
-        if t.is_empty() { "{}".into() } else { t.to_string() }
+        if t.is_empty() {
+            "{}".into()
+        } else {
+            t.to_string()
+        }
     } else {
         group(t)
     }
@@ -765,9 +774,7 @@ mod tests {
     use super::*;
 
     fn conv(inner: &str) -> String {
-        let xml = format!(
-            r#"<m:oMath xmlns:m="{M}" xmlns:w="{W}">{inner}</m:oMath>"#
-        );
+        let xml = format!(r#"<m:oMath xmlns:m="{M}" xmlns:w="{W}">{inner}</m:oMath>"#);
         let doc = roxmltree::Document::parse(&xml).unwrap();
         Omml::new().convert(doc.root_element())
     }
@@ -775,18 +782,27 @@ mod tests {
     #[test]
     fn basics() {
         assert_eq!(
-            conv("<m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:den><m:r><m:t>b</m:t></m:r></m:den></m:f>"),
+            conv(
+                "<m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:den><m:r><m:t>b</m:t></m:r></m:den></m:f>"
+            ),
             "\\frac{a}{b}"
         );
         assert_eq!(
-            conv("<m:sSup><m:e><m:r><m:t>x</m:t></m:r></m:e><m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup>"),
+            conv(
+                "<m:sSup><m:e><m:r><m:t>x</m:t></m:r></m:e><m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup>"
+            ),
             "x^{2}"
         );
         assert_eq!(
-            conv("<m:rad><m:radPr><m:degHide m:val=\"1\"/></m:radPr><m:deg/><m:e><m:r><m:t>2</m:t></m:r></m:e></m:rad>"),
+            conv(
+                "<m:rad><m:radPr><m:degHide m:val=\"1\"/></m:radPr><m:deg/><m:e><m:r><m:t>2</m:t></m:r></m:e></m:rad>"
+            ),
             "\\sqrt{2}"
         );
-        assert_eq!(conv("<m:r><m:t>α+β≤∞</m:t></m:r>"), "\\alpha +\\beta \\le \\infty");
+        assert_eq!(
+            conv("<m:r><m:t>α+β≤∞</m:t></m:r>"),
+            "\\alpha +\\beta \\le \\infty"
+        );
         assert_eq!(conv("<m:r><m:t>ℝ</m:t></m:r>"), "\\mathbb{R}");
     }
 }

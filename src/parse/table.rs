@@ -4,7 +4,10 @@ use roxmltree::Node;
 use serde_json::{Map, Value, json};
 
 use super::word::{self, TblPr, child, isw, margins, round2, wa, wval};
-use super::{Ctx, PARA_KEYS, Para, Seg, TEXT_KEYS, compact, diff, from_map, hoist, merged, same, size_of, text_of, to_map};
+use super::{
+    Ctx, PARA_KEYS, Para, Seg, TEXT_KEYS, compact, diff, from_map, hoist, merged, same, size_of,
+    text_of, to_map,
+};
 use crate::style::{Border, Style};
 
 /// 一个 w:tc。
@@ -73,7 +76,11 @@ impl Ctx {
         }
         let tblw = tblpr.and_then(|p| child(p, "tblW")).map(|w| {
             (
-                wa(w, "w").unwrap_or("0").trim_end_matches('%').parse::<f32>().unwrap_or(0.0),
+                wa(w, "w")
+                    .unwrap_or("0")
+                    .trim_end_matches('%')
+                    .parse::<f32>()
+                    .unwrap_or(0.0),
                 wa(w, "type").unwrap_or("dxa").to_string(),
                 wa(w, "w").is_some_and(|x| x.ends_with('%')),
             )
@@ -94,7 +101,12 @@ impl Ctx {
             .map(|g| {
                 g.children()
                     .filter(|c| isw(*c, "gridCol"))
-                    .map(|c| wa(c, "w").and_then(|w| w.parse::<f32>().ok()).unwrap_or(0.0) / 20.0)
+                    .map(|c| {
+                        wa(c, "w")
+                            .and_then(|w| w.parse::<f32>().ok())
+                            .unwrap_or(0.0)
+                            / 20.0
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -109,12 +121,15 @@ impl Ctx {
         let mut ncols = grid.len();
         for (r, tr) in rows_n.iter().enumerate() {
             let trpr = child(*tr, "trPr");
-            let num = |n: Option<Node>, a: &str| n.and_then(|x| wa(x, a)).and_then(|v| v.parse::<f32>().ok());
+            let num = |n: Option<Node>, a: &str| {
+                n.and_then(|x| wa(x, a)).and_then(|v| v.parse::<f32>().ok())
+            };
             let height = trpr.and_then(|p| child(p, "trHeight")).and_then(|h| {
                 let v = num(Some(h), "val")?;
                 Some((round2(v / 20.0), wa(h, "hRule") == Some("exact")))
             });
-            let before = num(trpr.and_then(|p| child(p, "gridBefore")), "val").unwrap_or(0.0) as usize;
+            let before =
+                num(trpr.and_then(|p| child(p, "gridBefore")), "val").unwrap_or(0.0) as usize;
             if before > 0 || trpr.and_then(|p| child(p, "gridAfter")).is_some() {
                 self.warns.once(
                     "gridBefore",
@@ -123,8 +138,12 @@ impl Ctx {
             }
             rows.push(TRow {
                 height,
-                header: trpr.and_then(|p| child(p, "tblHeader")).is_some_and(word::on_off),
-                cant_split: trpr.and_then(|p| child(p, "cantSplit")).is_some_and(word::on_off),
+                header: trpr
+                    .and_then(|p| child(p, "tblHeader"))
+                    .is_some_and(word::on_off),
+                cant_split: trpr
+                    .and_then(|p| child(p, "cantSplit"))
+                    .is_some_and(word::on_off),
             });
             let mut c = 0;
             for _ in 0..before {
@@ -168,10 +187,7 @@ impl Ctx {
                             "bottom" => 2,
                             "left" | "start" => 3,
                             "tl2br" | "tr2bl" => {
-                                self.warns.once(
-                                    "diag",
-                                    "格子里的斜线没保留".into(),
-                                );
+                                self.warns.once("diag", "格子里的斜线没保留".into());
                                 continue;
                             }
                             _ => continue,
@@ -180,12 +196,15 @@ impl Ctx {
                     }
                 }
                 let shd = pr.and_then(|p| child(p, "shd")).and_then(word::shading);
-                let valign = pr.and_then(|p| child(p, "vAlign")).and_then(wval).and_then(|v| match v {
-                    "center" => Some("middle"),
-                    "bottom" => Some("bottom"),
-                    "top" => Some("top"),
-                    _ => None,
-                });
+                let valign =
+                    pr.and_then(|p| child(p, "vAlign"))
+                        .and_then(wval)
+                        .and_then(|v| match v {
+                            "center" => Some("middle"),
+                            "bottom" => Some("bottom"),
+                            "top" => Some("top"),
+                            _ => None,
+                        });
                 let rotation = pr
                     .and_then(|p| child(p, "textDirection"))
                     .and_then(wval)
@@ -194,7 +213,10 @@ impl Ctx {
                         "btLr" => Some(270),
                         _ => None,
                     });
-                let mar = pr.and_then(|p| child(p, "tcMar")).map(margins).unwrap_or([None; 4]);
+                let mar = pr
+                    .and_then(|p| child(p, "tcMar"))
+                    .map(margins)
+                    .unwrap_or([None; 4]);
                 let mut paras = Vec::new();
                 for k in tc.children().filter(|k| k.is_element()) {
                     if isw(k, "p") {
@@ -264,17 +286,57 @@ impl Ctx {
         for (i, cl) in cells.iter().enumerate() {
             let last_col = cl.c + cl.span >= ncols;
             let top = own(i, 0)
-                .or_else(|| (cl.r > 0).then(|| at[cl.r - 1][cl.c].and_then(|u| own(u, 2))).flatten())
-                .or_else(|| if cl.r == 0 { tp.borders[0].clone() } else { tp.borders[4].clone() });
+                .or_else(|| {
+                    (cl.r > 0)
+                        .then(|| at[cl.r - 1][cl.c].and_then(|u| own(u, 2)))
+                        .flatten()
+                })
+                .or_else(|| {
+                    if cl.r == 0 {
+                        tp.borders[0].clone()
+                    } else {
+                        tp.borders[4].clone()
+                    }
+                });
             let bottom = own(i, 2)
-                .or_else(|| (cl.r + 1 < nrows).then(|| at[cl.r + 1][cl.c].and_then(|d| own(d, 0))).flatten())
-                .or_else(|| if cl.r + 1 == nrows { tp.borders[2].clone() } else { tp.borders[4].clone() });
+                .or_else(|| {
+                    (cl.r + 1 < nrows)
+                        .then(|| at[cl.r + 1][cl.c].and_then(|d| own(d, 0)))
+                        .flatten()
+                })
+                .or_else(|| {
+                    if cl.r + 1 == nrows {
+                        tp.borders[2].clone()
+                    } else {
+                        tp.borders[4].clone()
+                    }
+                });
             let left = own(i, 3)
-                .or_else(|| (cl.c > 0).then(|| at[cl.r][cl.c - 1].and_then(|l| own(l, 1))).flatten())
-                .or_else(|| if cl.c == 0 { tp.borders[3].clone() } else { tp.borders[5].clone() });
+                .or_else(|| {
+                    (cl.c > 0)
+                        .then(|| at[cl.r][cl.c - 1].and_then(|l| own(l, 1)))
+                        .flatten()
+                })
+                .or_else(|| {
+                    if cl.c == 0 {
+                        tp.borders[3].clone()
+                    } else {
+                        tp.borders[5].clone()
+                    }
+                });
             let right = own(i, 1)
-                .or_else(|| (!last_col).then(|| at[cl.r][cl.c + cl.span].and_then(|x| own(x, 3))).flatten())
-                .or_else(|| if last_col { tp.borders[1].clone() } else { tp.borders[5].clone() });
+                .or_else(|| {
+                    (!last_col)
+                        .then(|| at[cl.r][cl.c + cl.span].and_then(|x| own(x, 3)))
+                        .flatten()
+                })
+                .or_else(|| {
+                    if last_col {
+                        tp.borders[1].clone()
+                    } else {
+                        tp.borders[5].clone()
+                    }
+                });
             edges.push([top, right, bottom, left]);
         }
         // 合并块的边：上、左、右取起始格，下取最后一行
@@ -282,8 +344,15 @@ impl Ctx {
         let block_edges = |b: usize| -> [Value; 4] {
             let cl = &cells[b];
             let last_r = cl.r + row_span[b] - 1;
-            let bottom = at[last_r][cl.c].map(|x| edges[x][2].clone()).unwrap_or(None);
-            [bval(&edges[b][0]), bval(&edges[b][1]), bval(&bottom), bval(&edges[b][3])]
+            let bottom = at[last_r][cl.c]
+                .map(|x| edges[x][2].clone())
+                .unwrap_or(None);
+            [
+                bval(&edges[b][0]),
+                bval(&edges[b][1]),
+                bval(&bottom),
+                bval(&edges[b][3]),
+            ]
         };
         // 各位置最常见的线当表格的边框
         let mut pools: [Vec<Value>; 6] = Default::default();
@@ -333,10 +402,19 @@ impl Ctx {
 
         // 格子边距
         let mar_tw = |i: usize, d: f32| tp.cell_mar[i].unwrap_or(d);
-        let pad = [mar_tw(0, 0.0), mar_tw(1, 108.0), mar_tw(2, 0.0), mar_tw(3, 108.0)].map(|x| round2(x / 20.0));
+        let pad = [
+            mar_tw(0, 0.0),
+            mar_tw(1, 108.0),
+            mar_tw(2, 0.0),
+            mar_tw(3, 108.0),
+        ]
+        .map(|x| round2(x / 20.0));
         tstyle.insert("cellPadding".into(), json!(pad[3]));
         let mut cell_part = Map::new();
-        for (i, k) in ["paddingTop", "paddingRight", "paddingBottom"].iter().enumerate() {
+        for (i, k) in ["paddingTop", "paddingRight", "paddingBottom"]
+            .iter()
+            .enumerate()
+        {
             if (pad[i] - pad[3]).abs() > 0.01 {
                 cell_part.insert(k.to_string(), json!(pad[i]));
             }
@@ -355,7 +433,10 @@ impl Ctx {
                     .filter(|i| origin[*i] == b)
                     .flat_map(|i| {
                         let cont = i != b;
-                        cells[i].paras.iter().filter(move |p| !cont || !p.segs.is_empty())
+                        cells[i]
+                            .paras
+                            .iter()
+                            .filter(move |p| !cont || !p.segs.is_empty())
                     })
                     .collect();
                 // 格子末尾的空段落也不要（不然文字后面多一个换行）
@@ -379,7 +460,9 @@ impl Ctx {
                     for s in &p.segs {
                         match s {
                             Seg::PageBreak => {}
-                            Seg::Math { latex, style, jc, .. } => segs.push(Seg::Math {
+                            Seg::Math {
+                                latex, style, jc, ..
+                            } => segs.push(Seg::Math {
                                 latex: latex.clone(),
                                 display: false,
                                 jc: jc.clone(),
@@ -401,11 +484,12 @@ impl Ctx {
                 (eff, hoisted, segs)
             })
             .collect();
-        if cells.iter().any(|c| c.paras.iter().any(|p| p.list.is_some())) {
-            self.warns.once(
-                "tbllist",
-                "表格里的列表编号没保留，只留了文字".into(),
-            );
+        if cells
+            .iter()
+            .any(|c| c.paras.iter().any(|p| p.list.is_some()))
+        {
+            self.warns
+                .once("tbllist", "表格里的列表编号没保留，只留了文字".into());
         }
         let inh_keys: Vec<&str> = TEXT_KEYS
             .iter()
@@ -417,9 +501,7 @@ impl Ctx {
             .filter(|(_, h, s)| !h.is_empty() && !s.is_empty())
             .map(|(e, h, _)| {
                 let mut m = e.clone();
-                m.retain(|k, _| {
-                    h.iter().any(|x| x == k) || !TEXT_KEYS.contains(&k.as_str())
-                });
+                m.retain(|k, _| h.iter().any(|x| x == k) || !TEXT_KEYS.contains(&k.as_str()));
                 (m, 1)
             })
             .collect();
@@ -478,7 +560,9 @@ impl Ctx {
             let mut keys: Vec<&str> = PARA_KEYS
                 .iter()
                 .copied()
-                .filter(|k| !k.starts_with("border") && !k.starts_with("padding") && *k != "background")
+                .filter(|k| {
+                    !k.starts_with("border") && !k.starts_with("padding") && *k != "background"
+                })
                 .collect();
             keys.extend(TEXT_KEYS.iter().copied());
             let mut d = if segs.is_empty() && hoisted.is_empty() {
@@ -501,7 +585,10 @@ impl Ctx {
             if let Some(rot) = cl.rotation {
                 d.insert("textRotation".into(), json!(rot));
             }
-            for (i, k) in ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"].iter().enumerate() {
+            for (i, k) in ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]
+                .iter()
+                .enumerate()
+            {
                 if let Some(m) = cl.mar[i] {
                     let v = round2(m / 20.0);
                     if (v - pad[i]).abs() > 0.01 {
@@ -519,7 +606,10 @@ impl Ctx {
                 if last_r { 2 } else { 4 },
                 if cl.c == 0 { 3 } else { 5 },
             ];
-            for (k, side) in ["borderTop", "borderRight", "borderBottom", "borderLeft"].iter().enumerate() {
+            for (k, side) in ["borderTop", "borderRight", "borderBottom", "borderLeft"]
+                .iter()
+                .enumerate()
+            {
                 if !same(&e[k], &base_edge(&base, &tstyle, pos[k])) {
                     d.insert(side.to_string(), e[k].clone());
                 }
@@ -592,9 +682,8 @@ impl Ctx {
                 }
             })
             .collect();
-        let all_equal_ratio = ratio
-            && !auto_col.iter().any(|x| *x)
-            && gpt.iter().all(|w| (w - gpt[0]).abs() < 0.5);
+        let all_equal_ratio =
+            ratio && !auto_col.iter().any(|x| *x) && gpt.iter().all(|w| (w - gpt[0]).abs() < 0.5);
         let inferred_auto = auto_col.iter().any(|x| *x);
         match layout.as_deref() {
             Some("autofit") if !inferred_auto => {

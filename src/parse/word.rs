@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use roxmltree::{Document, Node};
 
 use crate::style::{
-    Align, Background, Border, BorderStyle, Caps, Color, EmphasisMark, FontFamily, Len,
-    LineHeight, PATTERNS, Strike, Style, Underline, UnderlineStyle, VerticalAlign,
+    Align, Background, Border, BorderStyle, Caps, Color, EmphasisMark, FontFamily, Len, LineHeight,
+    PATTERNS, Strike, Style, Underline, UnderlineStyle, VerticalAlign,
 };
 
 use super::Warns;
@@ -285,7 +285,9 @@ pub fn shading(n: Node) -> Option<Background> {
     match val {
         "nil" => None,
         "clear" => fill.map(Background::Color),
-        "solid" => color.or(Some(Color::parse("#000000").unwrap())).map(Background::Color),
+        "solid" => color
+            .or(Some(Color::parse("#000000").unwrap()))
+            .map(Background::Color),
         p if PATTERNS.contains(&p) => Some(Background::Pattern {
             pattern: p.to_string(),
             color: color.unwrap_or_else(|| Color::parse("#000000").unwrap()),
@@ -300,7 +302,10 @@ pub fn shading(n: Node) -> Option<Background> {
 /// w:rPr 换成文字字段。
 pub fn rpr(n: Node, theme: &Theme, warns: &mut Warns) -> Style {
     let mut s = Style::default();
-    for c in n.children().filter(|c| c.is_element() && c.tag_name().namespace() == Some(W)) {
+    for c in n
+        .children()
+        .filter(|c| c.is_element() && c.tag_name().namespace() == Some(W))
+    {
         match c.tag_name().name() {
             "rFonts" => {
                 let get = |plain: &str, th: &str| -> Option<String> {
@@ -558,7 +563,10 @@ impl Ind {
 impl PPr {
     pub fn parse(n: Node, theme: &Theme, warns: &mut Warns) -> PPr {
         let mut p = PPr::default();
-        for c in n.children().filter(|c| c.is_element() && c.tag_name().namespace() == Some(W)) {
+        for c in n
+            .children()
+            .filter(|c| c.is_element() && c.tag_name().namespace() == Some(W))
+        {
             match c.tag_name().name() {
                 "pStyle" => p.style = wval(c).map(str::to_string),
                 "jc" => p.jc = wval(c).map(str::to_string),
@@ -608,9 +616,7 @@ impl PPr {
                     let v: Vec<(String, f32)> = c
                         .children()
                         .filter(|t| isw(*t, "tab"))
-                        .filter_map(|t| {
-                            Some((wval(t)?.to_string(), num(wa(t, "pos"))?))
-                        })
+                        .filter_map(|t| Some((wval(t)?.to_string(), num(wa(t, "pos"))?)))
                         .collect();
                     p.tabs = Some(v);
                 }
@@ -860,10 +866,7 @@ impl Styles {
             let kind = wa(s, "type").unwrap_or("paragraph").to_string();
             let mut ws = WStyle {
                 id: id.to_string(),
-                name: child(s, "name")
-                    .and_then(wval)
-                    .unwrap_or(id)
-                    .to_string(),
+                name: child(s, "name").and_then(wval).unwrap_or(id).to_string(),
                 based_on: child(s, "basedOn").and_then(wval).map(str::to_string),
                 ..WStyle::default()
             };
@@ -1011,15 +1014,14 @@ impl Numbering {
                     continue;
                 };
                 let mut v = Lvl {
-                    start: child(l, "start").and_then(|x| num(wval(x))).map(|x| x as u32),
+                    start: child(l, "start")
+                        .and_then(|x| num(wval(x)))
+                        .map(|x| x as u32),
                     fmt: child(l, "numFmt")
                         .and_then(wval)
                         .unwrap_or("decimal")
                         .to_string(),
-                    text: child(l, "lvlText")
-                        .and_then(wval)
-                        .unwrap_or("")
-                        .to_string(),
+                    text: child(l, "lvlText").and_then(wval).unwrap_or("").to_string(),
                     jc: child(l, "lvlJc").and_then(wval).map(str::to_string),
                     suff: child(l, "suff").and_then(wval).map(str::to_string),
                     ..Lvl::default()
@@ -1038,7 +1040,9 @@ impl Numbering {
             nb.abs.insert(id, lvls);
         }
         for n in root.children().filter(|c| isw(*c, "num")) {
-            let Some(id) = num(wa(n, "numId")) else { continue };
+            let Some(id) = num(wa(n, "numId")) else {
+                continue;
+            };
             let Some(abs) = child(n, "abstractNumId").and_then(|x| num(wval(x))) else {
                 continue;
             };
@@ -1067,7 +1071,9 @@ impl Numbering {
     pub fn levels(&self, num_id: i64, styles: &Styles) -> Option<(i64, Vec<Lvl>)> {
         let (mut abs, ov) = self.nums.get(&num_id)?.clone();
         for _ in 0..4 {
-            let Some(link) = self.links.get(&abs) else { break };
+            let Some(link) = self.links.get(&abs) else {
+                break;
+            };
             let target = styles
                 .chain(link)
                 .iter()

@@ -123,7 +123,10 @@ fn read_rels(files: &HashMap<String, Vec<u8>>, part: &str) -> HashMap<String, Re
     let Ok(doc) = Document::parse(text) else {
         return out;
     };
-    for n in doc.descendants().filter(|n| n.tag_name().name() == "Relationship") {
+    for n in doc
+        .descendants()
+        .filter(|n| n.tag_name().name() == "Relationship")
+    {
         let (Some(id), Some(t)) = (n.attribute("Id"), n.attribute("Target")) else {
             continue;
         };
@@ -473,9 +476,7 @@ fn same(a: &Value, b: &Value) -> bool {
             (x.as_f64().unwrap_or(0.0) - y.as_f64().unwrap_or(0.0)).abs() < 0.011
         }
         (Value::Object(x), Value::Object(y)) => {
-            x.len() == y.len()
-                && x.iter()
-                    .all(|(k, v)| y.get(k).is_some_and(|w| same(v, w)))
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w)))
         }
         (Value::Array(x), Value::Array(y)) => {
             x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same(v, w))
@@ -809,7 +810,8 @@ impl Ctx {
     // ---------- 节 ----------
 
     fn sect(&mut self, n: Node) -> Sect {
-        let f = |e: Option<Node>, a: &str| e.and_then(|x| wa(x, a)).and_then(|v| v.parse::<f32>().ok());
+        let f =
+            |e: Option<Node>, a: &str| e.and_then(|x| wa(x, a)).and_then(|v| v.parse::<f32>().ok());
         let pg = child(n, "pgSz");
         let mar = child(n, "pgMar");
         let mut s = Sect {
@@ -834,10 +836,8 @@ impl Ctx {
                 s.cols = Some((count, f(Some(c), "space").unwrap_or(425.0) / 20.0));
             }
             if c.children().any(|x| isw(x, "col")) {
-                self.warns.once(
-                    "cols",
-                    "分栏里各栏宽度不同，只保留了栏数和栏距".into(),
-                );
+                self.warns
+                    .once("cols", "分栏里各栏宽度不同，只保留了栏数和栏距".into());
             }
         }
         if let Some(p) = child(n, "pgNumType") {
@@ -857,9 +857,11 @@ impl Ctx {
                 format!("分节类型 `{t}` 没保留，按下一页分节处理"),
             );
         }
-        if child(n, "vAlign").and_then(wval).is_some_and(|v| v != "top") {
-            self.warns
-                .once("vAlign", "页面的垂直对齐没保留".into());
+        if child(n, "vAlign")
+            .and_then(wval)
+            .is_some_and(|v| v != "top")
+        {
+            self.warns.once("vAlign", "页面的垂直对齐没保留".into());
         }
         for r in n.children() {
             let list = if isw(r, "headerReference") {
@@ -869,10 +871,8 @@ impl Ctx {
             } else {
                 continue;
             };
-            if let (Some(t), Some(id)) = (
-                wa(r, "type").or(Some("default")),
-                r.attribute((R, "id")),
-            ) {
+            if let (Some(t), Some(id)) = (wa(r, "type").or(Some("default")), r.attribute((R, "id")))
+            {
                 list.push((t.to_string(), id.to_string()));
             }
         }
@@ -1228,7 +1228,11 @@ impl Ctx {
         let paras: Vec<Node> = body
             .descendants()
             .filter(|n| isw(*n, "p"))
-            .filter(|n| !n.ancestors().skip(1).any(|a| isw(a, "tbl") || isw(a, "txbxContent")))
+            .filter(|n| {
+                !n.ancestors()
+                    .skip(1)
+                    .any(|a| isw(a, "tbl") || isw(a, "txbxContent"))
+            })
             .collect();
         let mut stats = Vec::new();
         for p in paras {
@@ -1246,7 +1250,11 @@ impl Ctx {
             }
             let kind = if para.list.is_some() {
                 Kind::List
-            } else if let Some(l) = para.pstyle.as_deref().and_then(|s| self.styles.heading_level(s)) {
+            } else if let Some(l) = para
+                .pstyle
+                .as_deref()
+                .and_then(|s| self.styles.heading_level(s))
+            {
                 Kind::Heading(l)
             } else {
                 Kind::Text
@@ -1305,18 +1313,21 @@ impl Ctx {
             eff.insert("fontFamily".into(), f);
         }
         let base = to_map(&builtin("$global").cloned().unwrap_or_default());
-        let keys: Vec<&str> = TEXT_KEYS
-            .iter()
-            .chain(PARA_KEYS.iter())
-            .copied()
-            .collect();
+        let keys: Vec<&str> = TEXT_KEYS.iter().chain(PARA_KEYS.iter()).copied().collect();
         let mut doc = diff(&eff, &base, &keys, &[]);
         // Document 只放会继承的字段
         doc.retain(|k, _| {
             !matches!(
                 k.as_str(),
-                "spaceBefore" | "spaceAfter" | "marginLeft" | "marginRight" | "keepWithNext"
-                    | "keepTogether" | "pageBreakBefore" | "outlineLevel" | "background"
+                "spaceBefore"
+                    | "spaceAfter"
+                    | "marginLeft"
+                    | "marginRight"
+                    | "keepWithNext"
+                    | "keepTogether"
+                    | "pageBreakBefore"
+                    | "outlineLevel"
+                    | "background"
             ) && !k.starts_with("border")
                 && !k.starts_with("padding")
         });
@@ -1339,7 +1350,11 @@ impl Ctx {
                 .filter(|(k, _)| *k == Kind::Text)
                 .map(|(_, m)| m)
                 .collect();
-            apply_majority(&mut local, &texts, &["spaceBefore", "spaceAfter", "textIndent", "keepWithNext"]);
+            apply_majority(
+                &mut local,
+                &texts,
+                &["spaceBefore", "spaceAfter", "textIndent", "keepWithNext"],
+            );
         }
         let exp = to_map(&self.expected("Text", None, None));
         let tkeys = [
@@ -1513,7 +1528,13 @@ impl Ctx {
     }
 
     /// 标题、正文。
-    fn text_block(&mut self, kind: &'static str, level: Option<u8>, para: &Para, segs: &[Seg]) -> String {
+    fn text_block(
+        &mut self,
+        kind: &'static str,
+        level: Option<u8>,
+        para: &Para,
+        segs: &[Seg],
+    ) -> String {
         if let Some(l) = level {
             self.heading_style(l, para.pstyle.as_deref());
         }
@@ -1611,10 +1632,8 @@ impl Ctx {
                 }
                 Seg::Image(img) => {
                     if img.anchor.is_some() {
-                        self.warns.once(
-                            "anchor-inline",
-                            "和文字混排的浮动图片改成了行内图片".into(),
-                        );
+                        self.warns
+                            .once("anchor-inline", "和文字混排的浮动图片改成了行内图片".into());
                     }
                     json!({ "image": img.src, "width": round2(img.w), "height": round2(img.h) })
                 }
@@ -1672,7 +1691,15 @@ impl Ctx {
         Gate::Emit(href)
     }
 
-    fn push_text(&mut self, out: &mut Vec<Seg>, text: &str, style: &Style, href: &Option<String>, code: bool, cstyle: &Option<String>) {
+    fn push_text(
+        &mut self,
+        out: &mut Vec<Seg>,
+        text: &str,
+        style: &Style,
+        href: &Option<String>,
+        code: bool,
+        cstyle: &Option<String>,
+    ) {
         match self.gate() {
             Gate::Drop => {}
             Gate::Capture(i) => {
@@ -1761,7 +1788,14 @@ impl Ctx {
                             let mut tmp = Vec::new();
                             self.inline(c, base, None, &mut tmp);
                             let (text, style) = first_text(&tmp, base);
-                            self.push_seg(out, Seg::Field { field: f, text, style });
+                            self.push_seg(
+                                out,
+                                Seg::Field {
+                                    field: f,
+                                    text,
+                                    style,
+                                },
+                            );
                         }
                         FieldKind::Link(u) => self.inline(c, base, Some(u), out),
                         FieldKind::Toc(l) => {
@@ -1802,9 +1836,12 @@ impl Ctx {
         const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
         let choice = n.children().find(|c| is(*c, MC, "Choice"));
         if let Some(ch) = choice {
-            let has_pic = ch
-                .descendants()
-                .any(|d| d.tag_name().name() == "pic" && d.tag_name().namespace().is_some_and(|x| x.ends_with("/picture")));
+            let has_pic = ch.descendants().any(|d| {
+                d.tag_name().name() == "pic"
+                    && d.tag_name()
+                        .namespace()
+                        .is_some_and(|x| x.ends_with("/picture"))
+            });
             if has_pic {
                 for d in ch.children().filter(|x| isw(*x, "drawing")) {
                     self.drawing(d, out);
@@ -1812,10 +1849,8 @@ impl Ctx {
                 return;
             }
             if ch.descendants().any(|d| d.tag_name().name() == "txbx") {
-                self.warns.once(
-                    "textbox",
-                    "文本框没解析，里面的文字丢了".into(),
-                );
+                self.warns
+                    .once("textbox", "文本框没解析，里面的文字丢了".into());
             } else {
                 self.warns
                     .once("shape", "形状、艺术字这类图形没解析".into());
@@ -1847,7 +1882,8 @@ impl Ctx {
         });
         let cstyle = cstyle.filter(|_| !code);
         for c in r.children().filter(|c| c.is_element()) {
-            if c.tag_name().namespace() == Some("http://schemas.openxmlformats.org/markup-compatibility/2006")
+            if c.tag_name().namespace()
+                == Some("http://schemas.openxmlformats.org/markup-compatibility/2006")
                 && c.tag_name().name() == "AlternateContent"
             {
                 self.alternate(c, base, href, out);
@@ -1867,10 +1903,8 @@ impl Ctx {
                 "br" | "cr" => match wa(c, "type") {
                     Some("page") => self.push_seg(out, Seg::PageBreak),
                     Some("column") => {
-                        self.warns.once(
-                            "colbreak",
-                            "分栏符没保留，改成了换行".into(),
-                        );
+                        self.warns
+                            .once("colbreak", "分栏符没保留，改成了换行".into());
                         self.push_text(out, "\n", &style, href, code, &cstyle);
                     }
                     _ => self.push_text(out, "\n", &style, href, code, &cstyle),
@@ -1941,10 +1975,9 @@ impl Ctx {
                 }
                 "drawing" => self.drawing(c, out),
                 "pict" | "object" => self.vml(c, out),
-                "footnoteReference" | "endnoteReference" => self.warns.once(
-                    "footnote",
-                    "脚注、尾注没解析".into(),
-                ),
+                "footnoteReference" | "endnoteReference" => {
+                    self.warns.once("footnote", "脚注、尾注没解析".into())
+                }
                 _ => {}
             }
         }
@@ -2017,10 +2050,15 @@ impl Ctx {
             name = format!("{k}-{base}");
         }
         let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg") {
+        if !matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg"
+        ) {
             self.warns.once(
                 &format!("imgfmt:{ext}"),
-                format!("图片格式 {ext} 渲染时放不进 docx（只收 png、jpeg、gif、webp），文件照样导出了"),
+                format!(
+                    "图片格式 {ext} 渲染时放不进 docx（只收 png、jpeg、gif、webp），文件照样导出了"
+                ),
             );
         }
         self.assets.push((name.clone(), bytes));
@@ -2065,7 +2103,11 @@ impl Ctx {
         };
         let doc_pr = child_ns(box_, WP, "docPr");
         let alt = doc_pr
-            .and_then(|p| p.attribute("descr").filter(|s| !s.is_empty()).or(p.attribute("title")))
+            .and_then(|p| {
+                p.attribute("descr")
+                    .filter(|s| !s.is_empty())
+                    .or(p.attribute("title"))
+            })
             .unwrap_or("")
             .to_string();
         let rotation = box_
@@ -2140,10 +2182,8 @@ impl Ctx {
     fn vml(&mut self, n: Node, out: &mut Vec<Seg>) {
         let Some(img) = n.descendants().find(|x| is(*x, V, "imagedata")) else {
             if n.descendants().any(|x| x.tag_name().name() == "textbox") {
-                self.warns.once(
-                    "textbox",
-                    "文本框没解析，里面的文字丢了".into(),
-                );
+                self.warns
+                    .once("textbox", "文本框没解析，里面的文字丢了".into());
             }
             return;
         };
@@ -2318,7 +2358,11 @@ impl Ctx {
 
     fn list(&mut self, lr: ListRef, items: Vec<Para>) -> String {
         let levels = &lr.levels;
-        let min_lvl = items.iter().filter_map(|p| p.list.as_ref().map(|l| l.ilvl)).min().unwrap_or(0);
+        let min_lvl = items
+            .iter()
+            .filter_map(|p| p.list.as_ref().map(|l| l.ilvl))
+            .min()
+            .unwrap_or(0);
         // 段落和文字
         let all_runs: Vec<(Map<String, Value>, usize)> = items
             .iter()
@@ -2350,72 +2394,80 @@ impl Ctx {
         // 每一级的列表字段
         let lvl_ordered = |i: usize| -> bool { list_type(&levels[i]).0.ordered() };
         let ordered = lvl_ordered(min_lvl);
-        let fields = |ctx: &mut Ctx, i: usize, level: usize, para: Option<&Para>| -> Map<String, Value> {
-            let l = &levels[i];
-            let (ty, font) = list_type(l);
-            let mut m = Map::new();
-            m.insert(
-                "listStyleType".into(),
-                serde_json::to_value(&ty).unwrap_or(Value::Null),
-            );
-            if ty.ordered() {
-                let rt = renumber(&l.text, min_lvl);
-                if rt != format!("%{level}.") {
-                    m.insert("listMarkerFormat".into(), json!(rt));
+        let fields =
+            |ctx: &mut Ctx, i: usize, level: usize, para: Option<&Para>| -> Map<String, Value> {
+                let l = &levels[i];
+                let (ty, font) = list_type(l);
+                let mut m = Map::new();
+                m.insert(
+                    "listStyleType".into(),
+                    serde_json::to_value(&ty).unwrap_or(Value::Null),
+                );
+                if ty.ordered() {
+                    let rt = renumber(&l.text, min_lvl);
+                    if rt != format!("%{level}.") {
+                        m.insert("listMarkerFormat".into(), json!(rt));
+                    }
+                } else if let ListStyleType::Char(_) = ty
+                    && let Some(f) = font
+                {
+                    m.insert("listMarkerFont".into(), json!(f));
                 }
-            } else if let ListStyleType::Char(_) = ty
-                && let Some(f) = font
-            {
-                m.insert("listMarkerFont".into(), json!(f));
-            }
-            if let Some(s) = l.start.filter(|s| *s != 1) {
-                m.insert("listStart".into(), json!(s));
-            }
-            let ind = match para {
-                Some(p) if p.direct_ind => p.ppr.ind,
-                _ => l.ind,
+                if let Some(s) = l.start.filter(|s| *s != 1) {
+                    m.insert("listStart".into(), json!(s));
+                }
+                let ind = match para {
+                    Some(p) if p.direct_ind => p.ppr.ind,
+                    _ => l.ind,
+                };
+                let left = ind.left.unwrap_or(0.0) / 20.0;
+                let hanging = ind.hanging.unwrap_or(0.0) / 20.0;
+                let li = word::nice_em(left / level as f32, fs);
+                let lh = word::nice_em(hanging, fs);
+                m.insert("listIndent".into(), serde_json::to_value(li).unwrap());
+                m.insert("listHanging".into(), serde_json::to_value(lh).unwrap());
+                match l.jc.as_deref() {
+                    Some("center") => {
+                        m.insert("listMarkerAlign".into(), json!("center"));
+                    }
+                    Some("right" | "end") => {
+                        m.insert("listMarkerAlign".into(), json!("right"));
+                    }
+                    _ => {}
+                }
+                match l.suff.as_deref() {
+                    Some("space") => {
+                        m.insert("listMarkerGap".into(), json!("space"));
+                    }
+                    Some("nothing") => {
+                        m.insert("listMarkerGap".into(), json!("none"));
+                    }
+                    _ => {}
+                }
+                if let Some(c) = &l.rpr.color {
+                    let text_c = hoisted
+                        .get("color")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    if Some(c.css()) != text_c {
+                        m.insert("listMarkerColor".into(), json!(c.css()));
+                    }
+                }
+                if let Some(sz) = l.rpr.font_size.map(|x| x.abs_pt())
+                    && (sz - fs).abs() > 0.4
+                    && fs > 0.0
+                {
+                    m.insert("listMarkerSize".into(), json!(round2(sz / fs * 100.0)));
+                }
+                clean_map(&mut m);
+                let _ = ctx;
+                m
             };
-            let left = ind.left.unwrap_or(0.0) / 20.0;
-            let hanging = ind.hanging.unwrap_or(0.0) / 20.0;
-            let li = word::nice_em(left / level as f32, fs);
-            let lh = word::nice_em(hanging, fs);
-            m.insert("listIndent".into(), serde_json::to_value(li).unwrap());
-            m.insert("listHanging".into(), serde_json::to_value(lh).unwrap());
-            match l.jc.as_deref() {
-                Some("center") => {
-                    m.insert("listMarkerAlign".into(), json!("center"));
-                }
-                Some("right" | "end") => {
-                    m.insert("listMarkerAlign".into(), json!("right"));
-                }
-                _ => {}
-            }
-            match l.suff.as_deref() {
-                Some("space") => {
-                    m.insert("listMarkerGap".into(), json!("space"));
-                }
-                Some("nothing") => {
-                    m.insert("listMarkerGap".into(), json!("none"));
-                }
-                _ => {}
-            }
-            if let Some(c) = &l.rpr.color {
-                let text_c = hoisted.get("color").and_then(|v| v.as_str()).map(str::to_string);
-                if Some(c.css()) != text_c {
-                    m.insert("listMarkerColor".into(), json!(c.css()));
-                }
-            }
-            if let Some(sz) = l.rpr.font_size.map(|x| x.abs_pt())
-                && (sz - fs).abs() > 0.4
-                && fs > 0.0
-            {
-                m.insert("listMarkerSize".into(), json!(round2(sz / fs * 100.0)));
-            }
-            clean_map(&mut m);
-            let _ = ctx;
-            m
+        let first_para_of = |i: usize| {
+            items
+                .iter()
+                .find(|p| p.list.as_ref().is_some_and(|l| l.ilvl == i))
         };
-        let first_para_of = |i: usize| items.iter().find(|p| p.list.as_ref().is_some_and(|l| l.ilvl == i));
         let f1 = fields(self, min_lvl, 1, first_para_of(min_lvl));
         let exp_style = self.expected("List", None, None);
         let exp = to_map(&exp_style);
@@ -2433,7 +2485,8 @@ impl Ctx {
         // 第一级的列表字段：编号类型和默认一样时不写
         for (k, v) in &f1 {
             if k == "listStyleType" {
-                let def = serde_json::to_value(crate::render::common::default_type(1, ordered)).unwrap();
+                let def =
+                    serde_json::to_value(crate::render::common::default_type(1, ordered)).unwrap();
                 if same(v, &def) {
                     continue;
                 }
@@ -2480,7 +2533,18 @@ impl Ctx {
                 }
             }
             for k in base.keys() {
-                if !fi.contains_key(k) && matches!(k.as_str(), "listMarkerFormat" | "listStart" | "listMarkerAlign" | "listMarkerGap" | "listMarkerColor" | "listMarkerSize" | "listMarkerFont") {
+                if !fi.contains_key(k)
+                    && matches!(
+                        k.as_str(),
+                        "listMarkerFormat"
+                            | "listStart"
+                            | "listMarkerAlign"
+                            | "listMarkerGap"
+                            | "listMarkerColor"
+                            | "listMarkerSize"
+                            | "listMarkerFont"
+                    )
+                {
                     let def = match k.as_str() {
                         "listMarkerFormat" => json!(format!("%{level}.")),
                         "listStart" => json!(1),
@@ -2501,11 +2565,23 @@ impl Ctx {
         if items.len() > 1 && !contextual {
             let afters: Vec<f32> = items[..items.len() - 1]
                 .iter()
-                .map(|p| p.ppr.to_style(fs).space_after.map(|l| l.pt(fs, 0.0)).unwrap_or(0.0))
+                .map(|p| {
+                    p.ppr
+                        .to_style(fs)
+                        .space_after
+                        .map(|l| l.pt(fs, 0.0))
+                        .unwrap_or(0.0)
+                })
                 .collect();
             let befores: Vec<f32> = items[1..]
                 .iter()
-                .map(|p| p.ppr.to_style(fs).space_before.map(|l| l.pt(fs, 0.0)).unwrap_or(0.0))
+                .map(|p| {
+                    p.ppr
+                        .to_style(fs)
+                        .space_before
+                        .map(|l| l.pt(fs, 0.0))
+                        .unwrap_or(0.0)
+                })
                 .collect();
             let mut ip = Map::new();
             if afters[0] > 0.0 {
@@ -2521,11 +2597,12 @@ impl Ctx {
         if levels[min_lvl].rpr.bold == Some(true) {
             parts.insert("marker".into(), json!({ "bold": true }));
         }
-        if items.iter().any(|p| p.segs.iter().any(|s| matches!(s, Seg::PageBreak))) {
-            self.warns.once(
-                "listbreak",
-                "列表项里的分页符没保留".into(),
-            );
+        if items
+            .iter()
+            .any(|p| p.segs.iter().any(|s| matches!(s, Seg::PageBreak)))
+        {
+            self.warns
+                .once("listbreak", "列表项里的分页符没保留".into());
         }
         // 项：按层级嵌套
         struct It {
@@ -2535,13 +2612,28 @@ impl Ctx {
         }
         let mut root: Vec<It> = Vec::new();
         for p in &items {
-            let l = p.list.as_ref().map(|x| x.ilvl).unwrap_or(min_lvl).max(min_lvl) - min_lvl;
-            let segs: Vec<Seg> = p.segs.iter().filter(|s| !matches!(s, Seg::PageBreak)).cloned().collect();
+            let l = p
+                .list
+                .as_ref()
+                .map(|x| x.ilvl)
+                .unwrap_or(min_lvl)
+                .max(min_lvl)
+                - min_lvl;
+            let segs: Vec<Seg> = p
+                .segs
+                .iter()
+                .filter(|s| !matches!(s, Seg::PageBreak))
+                .cloned()
+                .collect();
             let text = self.inline_json(&segs, &elem_style);
             let mut cur = &mut root;
             for depth in 0..l {
                 if cur.is_empty() {
-                    cur.push(It { text: json!(""), kids: Vec::new(), ordered: None });
+                    cur.push(It {
+                        text: json!(""),
+                        kids: Vec::new(),
+                        ordered: None,
+                    });
                 }
                 let parent = cur.last_mut().unwrap();
                 let child_ordered = ordered_at.get(depth + 1).copied().unwrap_or(ordered);
@@ -2551,7 +2643,11 @@ impl Ctx {
                 }
                 cur = &mut parent.kids;
             }
-            cur.push(It { text, kids: Vec::new(), ordered: None });
+            cur.push(It {
+                text,
+                kids: Vec::new(),
+                ordered: None,
+            });
         }
         fn to_json(items: Vec<It>) -> Value {
             Value::Array(
@@ -2607,7 +2703,9 @@ impl Ctx {
                             }
                         }
                         "creator" => {
-                            if let Some(x) = n.text().filter(|s| !s.trim().is_empty() && *s != "unknown") {
+                            if let Some(x) =
+                                n.text().filter(|s| !s.trim().is_empty() && *s != "unknown")
+                            {
                                 meta.insert("author".into(), json!(x));
                             }
                         }
@@ -2664,7 +2762,13 @@ impl Ctx {
     }
 
     /// 一节的页眉（或页脚）定义。
-    fn hf_def(&mut self, s: &Sect, refs: &[(String, String)], i: usize, seen: &mut [bool; 3]) -> Option<Value> {
+    fn hf_def(
+        &mut self,
+        s: &Sect,
+        refs: &[(String, String)],
+        i: usize,
+        seen: &mut [bool; 3],
+    ) -> Option<Value> {
         let mut m = Map::new();
         for (slot, kind) in ["default", "first", "even"].iter().enumerate() {
             if *kind == "first" && !s.title_pg {
@@ -2673,7 +2777,10 @@ impl Ctx {
             if *kind == "even" && !self.even_odd {
                 continue;
             }
-            let r = refs.iter().find(|(t, _)| t == kind).map(|(_, id)| id.clone());
+            let r = refs
+                .iter()
+                .find(|(t, _)| t == kind)
+                .map(|(_, id)| id.clone());
             let v = match r {
                 Some(rid) => self.hf_element(&rid),
                 None => {
@@ -2727,7 +2834,10 @@ impl Ctx {
         // 只有空段落的页眉当成空的
         let empty = blocks.iter().all(|id| {
             self.elements.get(id).is_some_and(|e| {
-                e["type"] == "Text" && e["props"]["text"].as_str().is_some_and(|t| t.trim().is_empty())
+                e["type"] == "Text"
+                    && e["props"]["text"]
+                        .as_str()
+                        .is_some_and(|t| t.trim().is_empty())
             })
         });
         let out = if empty {
@@ -2738,7 +2848,11 @@ impl Ctx {
         } else if blocks.len() == 1 {
             Some(blocks[0].clone())
         } else {
-            let kind = if rel.target.contains("footer") { "footer" } else { "header" };
+            let kind = if rel.target.contains("footer") {
+                "footer"
+            } else {
+                "header"
+            };
             let id = self.id(if kind == "footer" { "footer" } else { "header" });
             self.add(&id, json!({ "type": "Document", "children": blocks }));
             Some(id)
@@ -2757,10 +2871,16 @@ fn join_runs(a: &Value, b: &Value) -> Option<Value> {
     match (a, b) {
         (Value::String(x), Value::String(y)) => Some(json!(format!("{x}{y}"))),
         (Value::Object(x), Value::Object(y)) => {
-            if x.contains_key("field") || y.contains_key("field") || x.contains_key("image") || y.contains_key("image") {
+            if x.contains_key("field")
+                || y.contains_key("field")
+                || x.contains_key("image")
+                || y.contains_key("image")
+            {
                 return None;
             }
-            if x.get("type").is_some_and(|t| t == "InlineMath") || y.get("type").is_some_and(|t| t == "InlineMath") {
+            if x.get("type").is_some_and(|t| t == "InlineMath")
+                || y.get("type").is_some_and(|t| t == "InlineMath")
+            {
                 return None;
             }
             let strip = |m: &Map<String, Value>| {
@@ -2860,7 +2980,10 @@ fn first_text(segs: &[Seg], base: &Style) -> (String, Style) {
     let mut text = String::new();
     let mut style = None;
     for s in segs {
-        if let Seg::Text { text: t, style: st, .. } = s {
+        if let Seg::Text {
+            text: t, style: st, ..
+        } = s
+        {
             text.push_str(t);
             if style.is_none() {
                 style = Some(st.clone());
@@ -2922,7 +3045,9 @@ fn symbol_char(font: &str, code: u32) -> String {
         };
         return m.to_string();
     }
-    char::from_u32(code).map(|c| c.to_string()).unwrap_or_default()
+    char::from_u32(code)
+        .map(|c| c.to_string())
+        .unwrap_or_default()
 }
 
 /// 编号定义的一级换成 listStyleType，返回符号字体（Char 类型才有用）。
@@ -2934,10 +3059,13 @@ fn list_type(l: &Lvl) -> (ListStyleType, Option<String>) {
         "upperLetter" => ListStyleType::UpperAlpha,
         "lowerRoman" => ListStyleType::LowerRoman,
         "upperRoman" => ListStyleType::UpperRoman,
-        "chineseCounting" | "chineseCountingThousand" | "japaneseCounting" | "chineseLegalSimplified"
-        | "ideographDigital" | "taiwaneseCounting" | "taiwaneseCountingThousand" => {
-            ListStyleType::CjkDecimal
-        }
+        "chineseCounting"
+        | "chineseCountingThousand"
+        | "japaneseCounting"
+        | "chineseLegalSimplified"
+        | "ideographDigital"
+        | "taiwaneseCounting"
+        | "taiwaneseCountingThousand" => ListStyleType::CjkDecimal,
         "ideographTraditional" => ListStyleType::CjkIdeographic,
         "decimalEnclosedCircle" | "decimalEnclosedCircleChinese" => ListStyleType::CircledDecimal,
         "none" => ListStyleType::None,
@@ -2982,7 +3110,11 @@ fn renumber(text: &str, min: usize) -> String {
     for k in 1..=9usize {
         let from = format!("%{k}");
         if out.contains(&from) {
-            let to = if k > min { format!("%{}", k - min) } else { String::new() };
+            let to = if k > min {
+                format!("%{}", k - min)
+            } else {
+                String::new()
+            };
             out = out.replace(&from, &to);
         }
     }
@@ -2997,9 +3129,12 @@ fn page_json(s: &Sect) -> Map<String, Value> {
     if landscape && w > h {
         std::mem::swap(&mut w, &mut h);
     }
-    let name = ["A3", "A4", "A5", "B5", "Letter", "Legal"].into_iter().find(|n| {
-        crate::units::page_size_pt(n).is_some_and(|(pw, ph)| (pw - w).abs() < 1.5 && (ph - h).abs() < 1.5)
-    });
+    let name = ["A3", "A4", "A5", "B5", "Letter", "Legal"]
+        .into_iter()
+        .find(|n| {
+            crate::units::page_size_pt(n)
+                .is_some_and(|(pw, ph)| (pw - w).abs() < 1.5 && (ph - h).abs() < 1.5)
+        });
     match name {
         Some(n) => {
             m.insert("size".into(), json!(n));
@@ -3025,7 +3160,10 @@ fn page_json(s: &Sect) -> Map<String, Value> {
     counts.sort_by(|a, b| b.1.cmp(&a.1));
     let main = counts[0].0;
     m.insert("margin".into(), json!(main));
-    for (i, k) in ["marginTop", "marginRight", "marginBottom", "marginLeft"].iter().enumerate() {
+    for (i, k) in ["marginTop", "marginRight", "marginBottom", "marginLeft"]
+        .iter()
+        .enumerate()
+    {
         if (mar[i] - main).abs() > 0.01 {
             m.insert(k.to_string(), json!(mar[i]));
         }

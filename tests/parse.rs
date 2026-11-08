@@ -134,7 +134,11 @@ fn examples_round_trip_structure() {
         let text = serde_json::to_string(&parsed.json).unwrap();
         let back = fmtagno::prepare(&text, &fmtagno::Env::default())
             .unwrap_or_else(|e| panic!("{name}：parse 出来的 JSON 不合法：{e:#}\n{text}"));
-        assert_eq!(shape(&original), shape(&back.1), "{name}：块的顺序和种类对不上");
+        assert_eq!(
+            shape(&original),
+            shape(&back.1),
+            "{name}：块的顺序和种类对不上"
+        );
         let (mut a, mut b) = (Vec::new(), Vec::new());
         headings(&original, &mut a);
         headings(&back.1, &mut b);
@@ -156,13 +160,18 @@ fn second_round_is_stable() {
         for (n, b) in &first.assets {
             std::fs::write(dir.join("x.assets").join(n), b).unwrap();
         }
-        let docx = fmtagno::render_str(&text, Format::Docx, Some(&dir)).unwrap().bytes;
+        let docx = fmtagno::render_str(&text, Format::Docx, Some(&dir))
+            .unwrap()
+            .bytes;
         let second = parse(&docx);
         assert_eq!(
             first.json["elements"], second.json["elements"],
             "{name}：第二轮解析出来不一样"
         );
-        assert_eq!(first.json["styles"], second.json["styles"], "{name}：styles 不一样");
+        assert_eq!(
+            first.json["styles"], second.json["styles"],
+            "{name}：styles 不一样"
+        );
     }
 }
 
@@ -204,7 +213,10 @@ fn merged_cells_widths_and_row_heights() {
         .iter()
         .map(|x| x.as_f64().unwrap())
         .collect();
-    assert!((w[1] / w[0] - 2.0).abs() < 0.01 && (w[2] / w[0] - 4.0).abs() < 0.01, "{w:?}");
+    assert!(
+        (w[1] / w[0] - 2.0).abs() < 0.01 && (w[2] / w[0] - 4.0).abs() < 0.01,
+        "{w:?}"
+    );
     assert_eq!(t["rowHeights"][0], "20pt");
     assert_eq!(t["rowHeights"][1]["rule"], "exact");
     assert!(t["rowHeights"][2].is_null());
@@ -265,12 +277,19 @@ fn all_border_styles_come_back_by_name() {
     let parsed = parse(&to_docx(json));
     let text = serde_json::to_string(&parsed.json).unwrap();
     let mut texts = Vec::new();
-    find(&original, &|n| matches!(n.component, Component::Text(_)), &mut texts);
+    find(
+        &original,
+        &|n| matches!(n.component, Component::Text(_)),
+        &mut texts,
+    );
     for n in texts {
         if let Some(b) = &n.style.border {
             let name = serde_json::to_value(b.style).unwrap();
             let name = name.as_str().unwrap();
-            assert!(text.contains(&format!(" {name} ")), "线型 {name} 没解析回来");
+            assert!(
+                text.contains(&format!(" {name} ")),
+                "线型 {name} 没解析回来"
+            );
         }
     }
 }
@@ -281,7 +300,11 @@ fn sections_headers_and_page_numbers() {
     let parsed = parse(&to_docx(json));
     let els = parsed.json["elements"].as_object().unwrap();
     let sections: Vec<&Value> = els.values().filter(|e| e["type"] == "Section").collect();
-    assert_eq!(sections.len(), 2, "第一节放在 meta.page，后面两节是 Section");
+    assert_eq!(
+        sections.len(),
+        2,
+        "第一节放在 meta.page，后面两节是 Section"
+    );
     let text = serde_json::to_string(&parsed.json).unwrap();
     assert!(text.contains(r#""field":"page""#));
     assert!(text.contains(r#""pageNumberStart":1"#));
@@ -295,7 +318,8 @@ fn sections_headers_and_page_numbers() {
 fn images_are_exported_next_to_json() {
     let dir = std::env::temp_dir().join("fmtagno-parse-img");
     std::fs::create_dir_all(&dir).unwrap();
-    let tmp = dir.join(format!("dot-{:?}.png", std::thread::current().id()).replace(['(', ')'], ""));
+    let tmp =
+        dir.join(format!("dot-{:?}.png", std::thread::current().id()).replace(['(', ')'], ""));
     image::RgbImage::from_pixel(8, 4, image::Rgb([10, 120, 200]))
         .save(&tmp)
         .unwrap();
@@ -308,15 +332,24 @@ fn images_are_exported_next_to_json() {
         "p": { "type": "Text", "props": { "text": ["前", { "image": "dot.png", "width": 16, "height": 8 }, "后"] } }
       }
     }"##;
-    let docx = fmtagno::render_str(json, Format::Docx, Some(&dir)).unwrap().bytes;
+    let docx = fmtagno::render_str(json, Format::Docx, Some(&dir))
+        .unwrap()
+        .bytes;
     let parsed = parse(&docx);
     assert!(!parsed.assets.is_empty());
     let img = &parsed.json["elements"]["image1"];
     assert_eq!(img["type"], "Image");
-    assert!(img["props"]["src"].as_str().unwrap().starts_with("x.assets/"));
+    assert!(
+        img["props"]["src"]
+            .as_str()
+            .unwrap()
+            .starts_with("x.assets/")
+    );
     assert_eq!(img["props"]["width"], 80);
     assert_eq!(img["style"]["horizontalAlign"], "center");
-    let runs = parsed.json["elements"]["p1"]["props"]["text"].as_array().unwrap();
+    let runs = parsed.json["elements"]["p1"]["props"]["text"]
+        .as_array()
+        .unwrap();
     assert_eq!(runs.len(), 3);
     assert_eq!(runs[1]["width"], 16);
 }
