@@ -1581,7 +1581,7 @@ impl Ctx {
                 continue;
             }
             match name {
-                "r" => self.run(c, base, &href, out),
+                "r" => self.wrun(c, base, &href, out),
                 "hyperlink" => {
                     let link = match c.attribute((R, "id")) {
                         Some(id) => self.rels.get(id).map(|r| r.target.clone()),
@@ -1667,7 +1667,7 @@ impl Ctx {
         let _ = (base, href);
     }
 
-    fn run(&mut self, r: Node, base: &Style, href: &Option<String>, out: &mut Vec<Seg>) {
+    fn wrun(&mut self, r: Node, base: &Style, href: &Option<String>, out: &mut Vec<Seg>) {
         let rpr = child(r, "rPr");
         let cstyle = rpr
             .and_then(|p| child(p, "rStyle"))
