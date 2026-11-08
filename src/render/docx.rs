@@ -151,10 +151,11 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
             if let Some(n) = lay.page_number_start {
                 sec = sec.page_num_type(PageNumType::new().start(n));
             }
-            for b in blocks {
+            for b in merge_col_breaks(blocks) {
                 sec = match b {
                     Block::P(p) => sec.add_paragraph(p),
                     Block::T(t) => sec.add_table(t),
+                    Block::ColBreak => sec,
                 };
             }
             docx = docx.add_section(sec);
@@ -181,10 +182,11 @@ pub fn render(doc: &Doc, tree: &Node, opts: &Options) -> anyhow::Result<Output> 
                 }
             }
         } else {
-            for b in blocks {
+            for b in merge_col_breaks(blocks) {
                 docx = match b {
                     Block::P(p) => docx.add_paragraph(p),
                     Block::T(t) => docx.add_table(t),
+                    Block::ColBreak => docx,
                 };
             }
             docx.document.section_property.page_size = size;
@@ -827,6 +829,46 @@ fn mark_table_headers(doc: &[u8], heads: &[bool]) -> Vec<u8> {
 enum Block {
     P(Paragraph),
     T(Table),
+    /// 分栏符，写文件前并进下一段开头（见 merge_col_breaks）
+    ColBreak,
+}
+
+fn col_break_run() -> Run {
+    Run::new().add_break(BreakType::Column)
+}
+
+/// 分栏符单独占一段时，Word 在符号处换栏，但这一段的段落标记会跟到下一栏顶上，
+/// 多出一个空行。所以把分栏符放进下一段第一个 run 前面；后面不是段落（表格或节尾）时才单独占一段。
+fn merge_col_breaks(blocks: Vec<Block>) -> Vec<Block> {
+    let mut out = Vec::with_capacity(blocks.len());
+    let mut pending = false;
+    for b in blocks {
+        match b {
+            Block::ColBreak => {
+                if pending {
+                    out.push(Block::P(Paragraph::new().add_run(col_break_run())));
+                }
+                pending = true;
+            }
+            Block::P(mut p) => {
+                if std::mem::take(&mut pending) {
+                    p.children
+                        .insert(0, docx_rs::ParagraphChild::Run(Box::new(col_break_run())));
+                }
+                out.push(Block::P(p));
+            }
+            Block::T(t) => {
+                if std::mem::take(&mut pending) {
+                    out.push(Block::P(Paragraph::new().add_run(col_break_run())));
+                }
+                out.push(Block::T(t));
+            }
+        }
+    }
+    if pending {
+        out.push(Block::P(Paragraph::new().add_run(col_break_run())));
+    }
+    out
 }
 
 struct Ctx<'a> {
@@ -959,9 +1001,7 @@ impl Ctx<'_> {
             Component::Table(p) => self.table(n, p),
             Component::Image(p) => self.image(n, p),
             Component::PageBreak(_) => self.page_break(),
-            Component::ColumnBreak(_) => self.blocks.push(Block::P(
-                Paragraph::new().add_run(Run::new().add_break(BreakType::Column)),
-            )),
+            Component::ColumnBreak(_) => self.blocks.push(Block::ColBreak),
             Component::Section(p) => {
                 let lay = p.layout();
                 let page = &lay.page;
@@ -992,6 +1032,7 @@ impl Ctx<'_> {
             h = match b {
                 Block::P(p) => h.add_paragraph(p),
                 Block::T(t) => h.add_table(t),
+                Block::ColBreak => h,
             };
         }
         h
@@ -1003,6 +1044,7 @@ impl Ctx<'_> {
             f = match b {
                 Block::P(p) => f.add_paragraph(p),
                 Block::T(t) => f.add_table(t),
+                Block::ColBreak => f,
             };
         }
         f

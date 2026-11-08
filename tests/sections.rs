@@ -168,6 +168,18 @@ fn docx_writes_page_number_format_and_column_break() {
     assert_eq!(count(&x, "w:fmt="), 3);
     assert!(x.contains(r#"<w:pgNumType w:start="1" />"#), "正文");
     assert_eq!(count(&x, r#"<w:br w:type="column" />"#), 1);
+    // 分栏符放进下一段开头，不单独占一段（单独占一段时 Word 下一栏顶上会多一个空行）
+    let at = x.find(r#"<w:br w:type="column" />"#).unwrap();
+    let p_start = x[..at].rfind("<w:p>").max(x[..at].rfind("<w:p ")).unwrap();
+    let p_end = at + x[at..].find("</w:p>").unwrap();
+    assert!(x[p_start..p_end].contains("这一段在分栏符后面"), "分栏符应和下一段同段");
+}
+
+#[test]
+fn docx_column_break_before_table_keeps_own_paragraph() {
+    let json = r#"{"root":"d","elements":{"d":{"type":"Document","children":["a","cb","t"]},"a":{"type":"Text","props":{"text":"a"}},"cb":{"type":"ColumnBreak"},"t":{"type":"Table","props":{"rows":[["x"]]}}}}"#;
+    let x = render(json, Format::Docx);
+    assert_eq!(count(&x, r#"<w:br w:type="column" />"#), 1);
 }
 
 #[test]
