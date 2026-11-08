@@ -172,10 +172,7 @@ fn docx_writes_page_number_format_and_column_break() {
     let at = x.find(r#"<w:br w:type="column" />"#).unwrap();
     let p_start = x[..at].rfind("<w:p>").max(x[..at].rfind("<w:p ")).unwrap();
     let p_end = at + x[at..].find("</w:p>").unwrap();
-    assert!(
-        x[p_start..p_end].contains(">右栏<"),
-        "分栏符应和下一段同段"
-    );
+    assert!(x[p_start..p_end].contains(">右栏<"), "分栏符应和下一段同段");
 }
 
 #[test]
